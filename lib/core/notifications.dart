@@ -1,9 +1,11 @@
 import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'auth/auth_service.dart';
 import 'fancy.dart';
 import 'theme/app_theme.dart';
@@ -14,9 +16,14 @@ import 'theme/app_theme.dart';
 /// * Phones, app closed: the website's server already sends pushes to every
 ///   token in `device_tokens`. The app registers its token there (needs a
 ///   Firebase project — see README). Channel ids match the website server.
-const _chMsg = 'chat_messages_v3', _chGeneral = 'general_v3', _chCall = 'calls_v3';
+const _chMsg = 'chat_messages_v3',
+    _chGeneral = 'general_v3',
+    _chCall = 'calls_v3';
 
-bool get _isMobile => !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+bool get _isMobile =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
 bool get _localSupported => !kIsWeb;
 
 final _local = FlutterLocalNotificationsPlugin();
@@ -40,29 +47,61 @@ Future<void> _initLocal() async {
     macOS: DarwinInitializationSettings(),
     linux: LinuxInitializationSettings(defaultActionName: 'Open'),
   );
-  await _local.initialize(init, onDidReceiveNotificationResponse: (r) => NotificationService.instance?._onTap(r.payload));
-  final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-  await android?.createNotificationChannel(const AndroidNotificationChannel(_chMsg, 'Messages', importance: Importance.high));
-  await android?.createNotificationChannel(const AndroidNotificationChannel(_chGeneral, 'General', importance: Importance.defaultImportance));
-  await android?.createNotificationChannel(const AndroidNotificationChannel(_chCall, 'Calls', importance: Importance.max));
+  await _local.initialize(
+    init,
+    onDidReceiveNotificationResponse: (r) =>
+        NotificationService.instance?._onTap(r.payload),
+  );
+  final android = _local
+      .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin
+      >();
+  await android?.createNotificationChannel(
+    const AndroidNotificationChannel(
+      _chMsg,
+      'Messages',
+      importance: Importance.high,
+    ),
+  );
+  await android?.createNotificationChannel(
+    const AndroidNotificationChannel(
+      _chGeneral,
+      'General',
+      importance: Importance.defaultImportance,
+    ),
+  );
+  await android?.createNotificationChannel(
+    const AndroidNotificationChannel(
+      _chCall,
+      'Calls',
+      importance: Importance.max,
+    ),
+  );
 }
 
 Future<void> _showCall(Map<String, dynamic> d) => _local.show(
-      (d['call_id'] ?? '').hashCode,
-      d['caller_name']?.toString().isNotEmpty == true ? plainName(d['caller_name']) : 'Incoming call',
-      d['kind'] == 'video' ? 'Incoming video call' : 'Incoming voice call',
-      const NotificationDetails(
-        android: AndroidNotificationDetails(_chCall, 'Calls',
-            importance: Importance.max,
-            priority: Priority.max,
-            category: AndroidNotificationCategory.call,
-            fullScreenIntent: true,
-            ongoing: true,
-            timeoutAfter: 45000),
-        iOS: DarwinNotificationDetails(interruptionLevel: InterruptionLevel.timeSensitive),
-      ),
-      payload: 'chat:${d['chat_id']}',
-    );
+  (d['call_id'] ?? '').hashCode,
+  d['caller_name']?.toString().isNotEmpty == true
+      ? plainName(d['caller_name'])
+      : 'Incoming call',
+  d['kind'] == 'video' ? 'Incoming video call' : 'Incoming voice call',
+  const NotificationDetails(
+    android: AndroidNotificationDetails(
+      _chCall,
+      'Calls',
+      importance: Importance.max,
+      priority: Priority.max,
+      category: AndroidNotificationCategory.call,
+      fullScreenIntent: true,
+      ongoing: true,
+      timeoutAfter: 45000,
+    ),
+    iOS: DarwinNotificationDetails(
+      interruptionLevel: InterruptionLevel.timeSensitive,
+    ),
+  ),
+  payload: 'chat:${d['chat_id']}',
+);
 
 class NotificationService {
   static NotificationService? instance;
@@ -83,7 +122,10 @@ class NotificationService {
     if (_localSupported) {
       try {
         await _initLocal();
-        final android = _local.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+        final android = _local
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >();
         await android?.requestNotificationsPermission();
       } catch (e) {
         debugPrint('[notify] local init failed: $e');
@@ -98,7 +140,9 @@ class NotificationService {
           final chat = m.data['chat_id'];
           if (chat is String && chat.isNotEmpty) openChat(chat);
         });
-        FirebaseMessaging.instance.onTokenRefresh.listen((_) => _registerToken());
+        FirebaseMessaging.instance.onTokenRefresh.listen(
+          (_) => _registerToken(),
+        );
         _fcmReady = true;
       } catch (e) {
         debugPrint('[notify] Firebase not set up — phone push disabled: $e');
@@ -121,12 +165,19 @@ class NotificationService {
     if (_ch != null) db.removeChannel(_ch!);
     _ch = null;
     _user = uid;
+    _chatCache.clear();
+    activeChatId = null;
     if (uid == null) return;
     _registerToken();
     if (!_localSupported) return;
     _ch = db
         .channel('notify:$uid')
-        .onPostgresChanges(event: PostgresChangeEvent.insert, schema: 'public', table: 'messages', callback: (p) => _onMessage(p.newRecord))
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'messages',
+          callback: (p) => _onMessage(p.newRecord),
+        )
         .subscribe();
   }
 
@@ -139,7 +190,9 @@ class NotificationService {
       await db.from('device_tokens').upsert({
         'user_id': uid,
         'token': token,
-        'platform': defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
+        'platform': defaultTargetPlatform == TargetPlatform.iOS
+            ? 'ios'
+            : 'android',
         'device_name': 'TR MATRIX app',
         'last_seen_at': DateTime.now().toUtc().toIso8601String(),
       }, onConflict: 'token');
@@ -153,37 +206,72 @@ class NotificationService {
     if (!_fcmReady) return;
     try {
       final token = await FirebaseMessaging.instance.getToken();
-      if (token != null) await db.from('device_tokens').delete().eq('token', token);
+      if (token != null)
+        await db.from('device_tokens').delete().eq('token', token);
     } catch (_) {}
   }
 
-  final Map<String, (String, bool, bool)> _chatCache = {}; // id -> title, isGroup, muted
+  final Map<String, (String, bool, bool)> _chatCache =
+      {}; // id -> title, isGroup, muted
 
   Future<void> _onMessage(Map<String, dynamic> m) async {
     final me = auth.user?.id;
     final chatId = m['chat_id'] as String?;
-    if (me == null || chatId == null || m['sender_id'] == me || chatId == activeChatId) return;
+    if (me == null ||
+        chatId == null ||
+        m['sender_id'] == me ||
+        chatId == activeChatId)
+      return;
     try {
       var info = _chatCache[chatId];
       if (info == null) {
-        final chat = await db.from('chats').select('title, is_group').eq('id', chatId).maybeSingle();
-        final st = await db.from('chat_state').select('muted_until').eq('chat_id', chatId).eq('user_id', me).maybeSingle();
+        final chat = await db
+            .from('chats')
+            .select('title, is_group')
+            .eq('id', chatId)
+            .maybeSingle();
+        final st = await db
+            .from('chat_state')
+            .select('muted_until')
+            .eq('chat_id', chatId)
+            .eq('user_id', me)
+            .maybeSingle();
         final mu = DateTime.tryParse(st?['muted_until'] ?? '');
-        info = (chat?['title'] ?? 'Group', chat?['is_group'] == true, mu != null && mu.isAfter(DateTime.now()));
+        info = (
+          chat?['title'] ?? 'Group',
+          chat?['is_group'] == true,
+          mu != null && mu.isAfter(DateTime.now()),
+        );
         _chatCache[chatId] = info;
       }
       if (info.$3) return; // muted chat
-      final sender = await db.from('profiles').select('display_name, username').eq('id', m['sender_id']).maybeSingle();
-      final name = plainName(sender?['display_name'] ?? sender?['username'] ?? 'Someone');
+      final sender = await db
+          .from('profiles')
+          .select('display_name, username')
+          .eq('id', m['sender_id'])
+          .maybeSingle();
+      final name = plainName(
+        sender?['display_name'] ?? sender?['username'] ?? 'Someone',
+      );
       final text = prefs.hidePreviews
           ? 'New message'
-          : ((m['content'] as String?)?.isNotEmpty == true ? m['content'] as String : (m['media_type'] != null ? 'Sent an attachment' : 'New message'));
+          : ((m['content'] as String?)?.isNotEmpty == true
+                ? m['content'] as String
+                : (m['media_type'] != null
+                      ? 'Sent an attachment'
+                      : 'New message'));
+      if (auth.user?.id != me || activeChatId == chatId) return;
       await _local.show(
         chatId.hashCode,
         info.$2 ? info.$1 : name,
         info.$2 ? '$name: $text' : text,
         const NotificationDetails(
-          android: AndroidNotificationDetails(_chMsg, 'Messages', importance: Importance.high, priority: Priority.high),
+          android: AndroidNotificationDetails(
+            _chMsg,
+            'Messages',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
           iOS: DarwinNotificationDetails(),
           macOS: DarwinNotificationDetails(),
         ),

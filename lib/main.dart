@@ -1,8 +1,17 @@
-import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
+import 'data/chat_repository.dart';
+import 'data/contacts_repository.dart';
+import 'data/encrypted_cache.dart';
+import 'data/offline_store.dart';
+
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'core/app_scope.dart';
 import 'core/auth/auth_service.dart';
 import 'core/config.dart';
@@ -23,34 +32,81 @@ import 'features/shell/app_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (!kIsWeb && (defaultTargetPlatform == TargetPlatform.windows || defaultTargetPlatform == TargetPlatform.linux)) {
+  if (!kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux))
     MediaKit.ensureInitialized();
-  }
-  await Supabase.initialize(url: AppConfig.supabaseUrl, anonKey: AppConfig.supabaseAnonKey);
+  await Supabase.initialize(
+    url: AppConfig.supabaseUrl,
+    anonKey: AppConfig.supabaseAnonKey,
+  );
   final auth = AuthService(Supabase.instance.client);
   final theme = ThemeController();
   await theme.load();
   final calls = CallController(Supabase.instance.client, auth);
-  runApp(TRMatrixApp(auth: auth, theme: theme, calls: calls));
+  final store = await EncryptedCache.create();
+  final uid = auth.user?.id;
+  if (uid != null) await store.open(uid);
+  runApp(TRMatrixApp(auth: auth, theme: theme, calls: calls, store: store));
 }
 
 class TRMatrixApp extends StatefulWidget {
   final AuthService auth;
   final ThemeController theme;
   final CallController calls;
-  const TRMatrixApp({super.key, required this.auth, required this.theme, required this.calls});
+  final OfflineStore store;
+  const TRMatrixApp({
+    super.key,
+    required this.auth,
+    required this.theme,
+    required this.calls,
+    required this.store,
+  });
   @override
   State<TRMatrixApp> createState() => _TRMatrixAppState();
 }
 
 class _TRMatrixAppState extends State<TRMatrixApp> {
-  late final NotificationService _notify =
-      NotificationService(Supabase.instance.client, widget.auth, widget.theme, (chatId) => _router.go('/app/chat/$chatId'));
+  late final NotificationService _notify = NotificationService(
+    Supabase.instance.client,
+    widget.auth,
+    widget.theme,
+    (chatId) => _router.go('/app/chat/$chatId'),
+  );
+
+  late ChatRepository _chats;
+  late final ContactsRepository _contacts = ContactsRepository(
+    Supabase.instance.client,
+  );
+  void _accountChanged() {
+    final uid = widget.auth.user?.id ?? 'signed-out';
+    if (uid == _chats.ownerId) return;
+    final old = _chats.ownerId;
+    _chats.dispose();
+    if (old != 'signed-out') unawaited(widget.store.clear(old));
+    setState(
+      () =>
+          _chats = ChatRepository(Supabase.instance.client, widget.store, uid),
+    );
+  }
 
   @override
   void initState() {
     super.initState();
-    AuthService.beforeSignOut = _notify.unregister;
+    _chats = ChatRepository(
+      Supabase.instance.client,
+      widget.store,
+      widget.auth.user?.id ?? 'signed-out',
+    );
+    widget.auth.addListener(_accountChanged);
+    AuthService.beforeSignOut = () async {
+      try {
+        await _notify.unregister().timeout(const Duration(seconds: 5));
+      } catch (_) {}
+      final uid = widget.auth.user?.id;
+      _chats.dispose();
+      if (uid != null) await widget.store.clear(uid);
+    };
     _notify.start();
   }
 
@@ -67,29 +123,79 @@ class _TRMatrixAppState extends State<TRMatrixApp> {
     routes: [
       GoRoute(path: '/', redirect: (_, __) => '/app'),
       GoRoute(path: '/auth', builder: (_, __) => const AuthPage()),
-      ShellRoute(
-        builder: (_, state, child) => AppShell(location: state.matchedLocation, child: child),
-        routes: [
-          GoRoute(path: '/app', pageBuilder: (_, __) => const NoTransitionPage(child: ChatsPage())),
-          GoRoute(
-            path: '/app/chat/:chatId',
-            pageBuilder: (_, s) => NoTransitionPage(
-              child: ChatsPage(chatId: s.pathParameters['chatId'], initial: s.extra is ChatItem ? s.extra as ChatItem : null),
-            ),
+      StatefulShellRoute.indexedStack(
+        builder: (_, state, shell) => AppShell(
+          location: state.matchedLocation,
+          navigationShell: shell,
+          child: shell,
+        ),
+        branches: [
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/app',
+                pageBuilder: (_, __) =>
+                    const NoTransitionPage(child: ChatsPage()),
+                routes: [
+                  GoRoute(
+                    path: 'chat/:chatId',
+                    pageBuilder: (_, s) => NoTransitionPage(
+                      child: ChatsPage(
+                        chatId: s.pathParameters['chatId'],
+                        initial: s.extra is ChatItem
+                            ? s.extra as ChatItem
+                            : null,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          GoRoute(path: '/app/friends', pageBuilder: (_, __) => const NoTransitionPage(child: ContactsPage())),
-          GoRoute(
-            path: '/app/calls',
-            pageBuilder: (_, __) => const NoTransitionPage(child: CallsPage()),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/app/friends',
+                pageBuilder: (_, __) =>
+                    const NoTransitionPage(child: ContactsPage()),
+              ),
+            ],
           ),
-          GoRoute(
-            path: '/app/hives',
-            pageBuilder: (_, __) => const NoTransitionPage(child: HivesPage()),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/app/calls',
+                pageBuilder: (_, __) =>
+                    const NoTransitionPage(child: CallsPage()),
+              ),
+            ],
           ),
-          GoRoute(path: '/app/profile', pageBuilder: (_, __) => const NoTransitionPage(child: ProfilePage())),
-          GoRoute(
-            path: '/app/admin',
-            pageBuilder: (_, __) => const NoTransitionPage(child: AdminPage()),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/app/hives',
+                pageBuilder: (_, __) =>
+                    const NoTransitionPage(child: HivesPage()),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/app/profile',
+                pageBuilder: (_, __) =>
+                    const NoTransitionPage(child: ProfilePage()),
+              ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/app/admin',
+                pageBuilder: (_, __) =>
+                    const NoTransitionPage(child: AdminPage()),
+              ),
+            ],
           ),
         ],
       ),
@@ -97,11 +203,22 @@ class _TRMatrixAppState extends State<TRMatrixApp> {
   );
 
   @override
+  void dispose() {
+    widget.auth.removeListener(_accountChanged);
+    _chats.dispose();
+    _router.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AppScope(
       auth: widget.auth,
       theme: widget.theme,
       calls: widget.calls,
+      chats: _chats,
+      contacts: _contacts,
+      key: ValueKey(_chats.ownerId),
       child: ListenableBuilder(
         listenable: Listenable.merge([widget.theme, widget.auth]),
         builder: (_, __) => MaterialApp.router(
@@ -112,9 +229,13 @@ class _TRMatrixAppState extends State<TRMatrixApp> {
           builder: (ctx, child) => MediaQuery(
             data: MediaQuery.of(ctx).copyWith(
               textScaler: TextScaler.linear(widget.theme.textScale),
-              disableAnimations: widget.theme.reducedMotion || MediaQuery.of(ctx).disableAnimations,
+              disableAnimations:
+                  widget.theme.reducedMotion ||
+                  MediaQuery.of(ctx).disableAnimations,
             ),
-            child: MaintenanceGate(child: CallOverlay(child: child ?? const SizedBox.shrink())),
+            child: MaintenanceGate(
+              child: CallOverlay(child: child ?? const SizedBox.shrink()),
+            ),
           ),
         ),
       ),

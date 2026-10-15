@@ -1,5 +1,5 @@
 import 'package:flutter/widgets.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../data/chat_repository.dart';
 import '../data/contacts_repository.dart';
 import 'auth/auth_service.dart';
@@ -14,12 +14,23 @@ class AppScope extends InheritedWidget {
   final ContactsRepository contacts;
   final CallController calls;
 
-  AppScope({super.key, required this.auth, required this.theme, required this.calls, required super.child})
-      : chats = ChatRepository(Supabase.instance.client),
-        contacts = ContactsRepository(Supabase.instance.client);
+  const AppScope({
+    super.key,
+    required this.auth,
+    required this.theme,
+    required this.calls,
+    required this.chats,
+    required this.contacts,
+    required super.child,
+  });
 
-  static AppScope of(BuildContext c) => c.dependOnInheritedWidgetOfExactType<AppScope>()!;
+  static AppScope of(BuildContext c) {
+    final scope = c.dependOnInheritedWidgetOfExactType<AppScope>();
+    if (scope == null) throw StateError('AppScope missing');
+    return scope;
+  }
 
   @override
-  bool updateShouldNotify(AppScope old) => false;
+  bool updateShouldNotify(AppScope old) =>
+      old.chats != chats || old.auth != auth;
 }

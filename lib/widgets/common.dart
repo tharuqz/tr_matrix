@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:ui';
+import 'package:flutter/services.dart';
+import '../core/motion.dart';
 import 'package:flutter/material.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/tokens.dart';
@@ -15,14 +17,49 @@ class Hoverable extends StatefulWidget {
 }
 
 class _HoverableState extends State<Hoverable> {
-  bool _h = false;
+  bool _h = false, _focused = false, _pressed = false;
   @override
   Widget build(BuildContext context) {
     Widget w = MouseRegion(
-      cursor: widget.onTap != null ? SystemMouseCursors.click : MouseCursor.defer,
+      cursor:
+          widget.onTap != null ? SystemMouseCursors.click : MouseCursor.defer,
       onEnter: (_) => setState(() => _h = true),
       onExit: (_) => setState(() => _h = false),
-      child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: widget.onTap, child: widget.builder(context, _h)),
+      child: FocusableActionDetector(
+        enabled: widget.onTap != null,
+        onShowFocusHighlight: (v) => setState(() => _focused = v),
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+        },
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              widget.onTap?.call();
+              return null;
+            },
+          ),
+        },
+        child: Semantics(
+          button: widget.onTap != null,
+          label: widget.tooltip,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onTap,
+            onTapDown:
+                widget.onTap == null
+                    ? null
+                    : (_) => setState(() => _pressed = true),
+            onTapUp: (_) => setState(() => _pressed = false),
+            onTapCancel: () => setState(() => _pressed = false),
+            child: AnimatedScale(
+              scale: _pressed ? .97 : 1,
+              duration: matrixDuration(context, 110),
+              child: widget.builder(context, _h || _focused),
+            ),
+          ),
+        ),
+      ),
     );
     if (widget.tooltip != null) w = Tooltip(message: widget.tooltip!, child: w);
     return w;
@@ -34,7 +71,12 @@ class GlassPanel extends StatelessWidget {
   final Widget child;
   final double radius;
   final EdgeInsetsGeometry padding;
-  const GlassPanel({super.key, required this.child, this.radius = TRRadius.glass, this.padding = EdgeInsets.zero});
+  const GlassPanel({
+    super.key,
+    required this.child,
+    this.radius = TRRadius.glass,
+    this.padding = EdgeInsets.zero,
+  });
   @override
   Widget build(BuildContext context) {
     final c = context.tr;
@@ -56,92 +98,110 @@ class GlassPanel extends StatelessWidget {
   }
 }
 
-/// Background gradient #0B0D17 → #161925 with soft cyan/violet glows.
+/// Shared full-bleed neutral canvas.
 class MatrixBackground extends StatelessWidget {
   final Widget child;
   const MatrixBackground({super.key, required this.child});
   @override
-  Widget build(BuildContext context) {
-    final c = context.tr;
-    final dark = c.bg.computeLuminance() < .2;
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: dark ? [c.bg, const Color(0xFF161925)] : [c.bg, c.surface2],
-        ),
-      ),
-      child: Stack(children: [
-        Positioned(top: -120, left: -80, child: _glow(context.accent, 320)),
-        Positioned(bottom: -140, right: -60, child: _glow(TRAccent.violet, 360)),
-        Positioned.fill(child: child),
-      ]),
-    );
-  }
-
-  Widget _glow(Color c, double s) => IgnorePointer(
-        child: Container(
-          width: s,
-          height: s,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: RadialGradient(colors: [c.withValues(alpha: .18), c.withValues(alpha: 0)]),
-          ),
-        ),
-      );
+  Widget build(BuildContext context) =>
+      ColoredBox(color: context.tr.bg, child: child);
 }
 
-class TRAvatar extends StatelessWidget {
+class TRAvatar extends StatefulWidget {
   final String name;
   final String? url;
   final double size;
   final bool online;
-  const TRAvatar({super.key, required this.name, this.url, this.size = 44, this.online = false});
+  const TRAvatar({
+    super.key,
+    required this.name,
+    this.url,
+    this.size = 44,
+    this.online = false,
+  });
+
+  @override
+  State<TRAvatar> createState() => _TRAvatarState();
+}
+
+class _TRAvatarState extends State<TRAvatar> {
+  late Future<String?> _url;
+  @override
+  void initState() {
+    super.initState();
+    _url = resolveAvatarUrl(widget.url);
+  }
+
+  @override
+  void didUpdateWidget(TRAvatar old) {
+    super.didUpdateWidget(old);
+    if (old.url != widget.url) _url = resolveAvatarUrl(widget.url);
+  }
 
   String get _initials {
-    final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    final parts =
+        widget.name
+            .trim()
+            .split(RegExp(r'\s+'))
+            .where((p) => p.isNotEmpty)
+            .toList();
     if (parts.isEmpty) return '?';
-    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
-    return (parts[0][0] + parts[1][0]).toUpperCase();
+    return (parts.length == 1 ? parts.first[0] : parts[0][0] + parts[1][0])
+        .toUpperCase();
   }
 
   @override
   Widget build(BuildContext context) {
-    final c = context.tr;
+    final c = context.tr, size = widget.size;
+    final fallback = Text(
+      _initials,
+      style: TRText.display(size * .33, context.accent, w: FontWeight.w600),
+    );
     return SizedBox(
       width: size,
       height: size,
-      child: Stack(children: [
-        Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: c.surface3,
-            border: Border.all(color: c.border),
-          ),
-          alignment: Alignment.center,
-          clipBehavior: Clip.antiAlias,
-          child: FutureBuilder<String?>(
-            future: resolveAvatarUrl(url),
-            builder: (_, s) => s.data == null
-                ? Text(_initials, style: TRText.display(size * .36, c.text1, w: FontWeight.w600))
-                : Image.network(s.data!, width: size, height: size, fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Text(_initials, style: TRText.display(size * .36, c.text1, w: FontWeight.w600))),
-          ),
-        ),
-        if (online)
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: Container(
-              width: size * .28,
-              height: size * .28,
-              decoration: BoxDecoration(color: c.success, shape: BoxShape.circle, border: Border.all(color: c.bg, width: 2)),
+      child: Stack(
+        children: [
+          Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: context.accent.withValues(alpha: .10),
+            ),
+            child: FutureBuilder<String?>(
+              future: _url,
+              builder: (_, snapshot) {
+                final url = snapshot.data;
+                if (url == null) return fallback;
+                return Image.network(
+                  url,
+                  width: size,
+                  height: size,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => fallback,
+                );
+              },
             ),
           ),
-      ]),
+          if (widget.online)
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: Container(
+                width: size * .25,
+                height: size * .25,
+                decoration: BoxDecoration(
+                  color: c.success,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: c.bg, width: 2),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -176,7 +236,7 @@ class TRButton extends StatelessWidget {
         Border? border;
         switch (variant) {
           case TRButtonVariant.primary:
-            bg = h ? Color.lerp(a, Colors.white, .1)! : a;
+            bg = h ? (Color.lerp(a, c.text1, .1) ?? a) : a;
             fg = TRAccent.on(a);
           case TRButtonVariant.ghost:
             bg = h ? c.text1.withValues(alpha: .06) : Colors.transparent;
@@ -186,27 +246,45 @@ class TRButton extends StatelessWidget {
             fg = c.text1;
             border = Border.all(color: c.border);
           case TRButtonVariant.danger:
-            bg = h ? Color.lerp(c.danger, Colors.white, .1)! : c.danger;
-            fg = Colors.white;
+            bg = h ? (Color.lerp(c.danger, c.text1, .1) ?? c.danger) : c.danger;
+            fg = TRAccent.on(c.danger);
         }
         return AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
+          duration: matrixDuration(context, 150),
           height: large ? 52 : 40,
           padding: EdgeInsets.symmetric(horizontal: large ? 22 : 16),
           decoration: BoxDecoration(
             color: disabled ? bg.withValues(alpha: .5) : bg,
-            borderRadius: BorderRadius.circular(TRRadius.xl),
+            borderRadius: BorderRadius.circular(TRRadius.pill),
             border: border,
-            boxShadow: variant == TRButtonVariant.primary && h ? TRShadow.glow(a) : null,
+            boxShadow:
+                variant == TRButtonVariant.primary && h
+                    ? TRShadow.glow(a)
+                    : null,
           ),
-          child: Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
-            if (loading)
-              SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: fg))
-            else if (icon != null)
-              Icon(icon, size: 18, color: fg),
-            if (icon != null || loading) const SizedBox(width: 8),
-            Text(label, style: TRText.body(large ? 16 : 14, fg, w: FontWeight.w600)),
-          ]),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (loading)
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: fg),
+                )
+              else if (icon != null)
+                Icon(icon, size: 18, color: fg),
+              if (icon != null || loading) const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TRText.body(large ? 16 : 14, fg, w: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -219,23 +297,40 @@ class TRIconButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final double size;
   final bool active;
-  const TRIconButton({super.key, required this.icon, required this.tooltip, this.onPressed, this.size = 40, this.active = false});
+  const TRIconButton({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    this.onPressed,
+    this.size = 40,
+    this.active = false,
+  });
   @override
   Widget build(BuildContext context) {
     final c = context.tr;
     return Hoverable(
       tooltip: tooltip,
       onTap: onPressed,
-      builder: (_, h) => AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: active ? context.accent.withValues(alpha: .16) : (h ? c.text1.withValues(alpha: .07) : Colors.transparent),
-        ),
-        child: Icon(icon, size: size * .5, color: active ? context.accent : (h ? c.text1 : c.text2)),
-      ),
+      builder:
+          (_, h) => AnimatedContainer(
+            duration: matrixDuration(context, 150),
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color:
+                  active
+                      ? context.accent.withValues(alpha: .16)
+                      : (h
+                          ? c.text1.withValues(alpha: .07)
+                          : Colors.transparent),
+            ),
+            child: Icon(
+              icon,
+              size: size * .5,
+              color: active ? context.accent : (h ? c.text1 : c.text2),
+            ),
+          ),
     );
   }
 }
@@ -265,7 +360,10 @@ class TRTextField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.tr;
-    final border = OutlineInputBorder(borderRadius: BorderRadius.circular(TRRadius.xl), borderSide: BorderSide(color: c.border));
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(TRRadius.pill),
+      borderSide: BorderSide.none,
+    );
     return TextField(
       controller: controller,
       focusNode: focusNode,
@@ -284,10 +382,15 @@ class TRTextField extends StatelessWidget {
         filled: true,
         fillColor: c.surface2,
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
         enabledBorder: border,
         border: border,
-        focusedBorder: border.copyWith(borderSide: BorderSide(color: context.accent, width: 1.5)),
+        focusedBorder: border.copyWith(
+          borderSide: BorderSide(color: context.accent, width: 1.5),
+        ),
       ),
     );
   }
@@ -297,27 +400,47 @@ class EmptyState extends StatelessWidget {
   final IconData icon;
   final String title;
   final String? subtitle;
-  const EmptyState({super.key, required this.icon, required this.title, this.subtitle});
+  const EmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.subtitle,
+  });
   @override
   Widget build(BuildContext context) {
     final c = context.tr;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(color: c.surface2, shape: BoxShape.circle, border: Border.all(color: c.border)),
-            child: Icon(icon, size: 30, color: context.accent),
-          ),
-          const SizedBox(height: 16),
-          Text(title, style: TRText.display(18, c.text1, w: FontWeight.w600), textAlign: TextAlign.center),
-          if (subtitle != null) ...[
-            const SizedBox(height: 6),
-            Text(subtitle!, style: TRText.body(14, c.text2), textAlign: TextAlign.center),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: c.surface2,
+                shape: BoxShape.circle,
+                border: Border.all(color: c.border),
+              ),
+              child: Icon(icon, size: 30, color: context.accent),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              style: TRText.display(18, c.text1, w: FontWeight.w600),
+              textAlign: TextAlign.center,
+            ),
+            if (subtitle != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                subtitle!,
+                style: TRText.body(14, c.text2),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ],
-        ]),
+        ),
       ),
     );
   }
@@ -325,14 +448,21 @@ class EmptyState extends StatelessWidget {
 
 void showToast(BuildContext context, String msg, {bool error = false}) {
   final c = context.tr;
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    behavior: SnackBarBehavior.floating,
-    backgroundColor: c.surface3,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(TRRadius.xl), side: BorderSide(color: c.border)),
-    content: Text(msg, style: TRText.body(14, error ? c.danger : c.text1, w: FontWeight.w500)),
-  ));
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: c.surface3,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(TRRadius.xl),
+        side: BorderSide(color: c.border),
+      ),
+      content: Text(
+        msg,
+        style: TRText.body(14, error ? c.danger : c.text1, w: FontWeight.w500),
+      ),
+    ),
+  );
 }
-
 
 final Map<String, (String, DateTime)> _avatarCache = {};
 
@@ -343,10 +473,61 @@ Future<String?> resolveAvatarUrl(String? path) async {
   final hit = _avatarCache[path];
   if (hit != null && hit.$2.isAfter(DateTime.now())) return hit.$1;
   try {
-    final u = await Supabase.instance.client.storage.from('avatars').createSignedUrl(path, 3600);
+    final u = await Supabase.instance.client.storage
+        .from('avatars')
+        .createSignedUrl(path, 3600);
     _avatarCache[path] = (u, DateTime.now().add(const Duration(minutes: 55)));
     return u;
   } catch (_) {
     return null;
   }
+}
+
+class MatrixTabs extends StatelessWidget {
+  final List<String> labels;
+  final int selected;
+  final ValueChanged<int> onChanged;
+  const MatrixTabs({
+    super.key,
+    required this.labels,
+    required this.selected,
+    required this.onChanged,
+  });
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 44,
+    child: ListView.separated(
+      scrollDirection: Axis.horizontal,
+      itemCount: labels.length,
+      separatorBuilder: (_, __) => const SizedBox(width: 6),
+      itemBuilder:
+          (_, i) => Hoverable(
+            onTap: () => onChanged(i),
+            builder:
+                (_, hovered) => AnimatedContainer(
+                  duration: matrixDuration(context, 180),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color:
+                        selected == i
+                            ? context.accent.withValues(alpha: .14)
+                            : (hovered
+                                ? context.tr.surface2
+                                : Colors.transparent),
+                    borderRadius: BorderRadius.circular(TRRadius.pill),
+                  ),
+                  child: Text(
+                    labels[i],
+                    maxLines: 1,
+                    style: TRText.body(
+                      13,
+                      selected == i ? context.accent : context.tr.text2,
+                      w: FontWeight.w600,
+                    ),
+                  ),
+                ),
+          ),
+    ),
+  );
 }

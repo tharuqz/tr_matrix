@@ -64,13 +64,22 @@ class _ContactsPageState extends State<ContactsPage> {
   Future<void> _message(Profile p) async {
     final id = await AppScope.of(context).chats.getOrCreateDirect(p.id);
     if (!mounted) return;
-    context.go('/app/chat/$id',
-        extra: ChatItem(id: id, isGroup: false, title: p.displayName, avatarUrl: p.avatarUrl, otherUserId: p.id));
+    context.go(
+      '/app/chat/$id',
+      extra: ChatItem(
+        id: id,
+        isGroup: false,
+        title: p.displayName,
+        avatarUrl: p.avatarUrl,
+        otherUserId: p.id,
+      ),
+    );
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _q.dispose();
     super.dispose();
   }
 
@@ -78,46 +87,110 @@ class _ContactsPageState extends State<ContactsPage> {
   Widget build(BuildContext context) {
     final c = context.tr;
     final repo = AppScope.of(context).contacts;
-    final friendIds = {..._friends, ..._incoming, ..._outgoing}.map((r) => r.profile.id).toSet();
+    final friendIds =
+        {
+          ..._friends,
+          ..._incoming,
+          ..._outgoing,
+        }.map((r) => r.profile.id).toSet();
 
     List<Widget> rows;
     if (_tab == 0) {
-      rows = _friends.isEmpty
-          ? [const EmptyState(icon: Icons.people_outline_rounded, title: 'No friends yet', subtitle: 'Find people in the Add tab.')]
-          : _friends
-              .map((f) => _PersonTile(profile: f.profile, actions: [
-                    TRIconButton(icon: Icons.chat_bubble_outline_rounded, tooltip: 'Message', onPressed: () => _message(f.profile)),
-                    TRIconButton(
-                        icon: Icons.person_remove_outlined,
-                        tooltip: 'Remove',
-                        onPressed: () => _run(() => repo.remove(f.rel.id), 'Removed')),
-                  ]))
-              .toList();
+      rows =
+          _friends.isEmpty
+              ? [
+                const EmptyState(
+                  icon: Icons.people_outline_rounded,
+                  title: 'No friends yet',
+                  subtitle: 'Find people in the Add tab.',
+                ),
+              ]
+              : _friends
+                  .map(
+                    (f) => _PersonTile(
+                      profile: f.profile,
+                      actions: [
+                        TRIconButton(
+                          icon: Icons.chat_bubble_outline_rounded,
+                          tooltip: 'Message',
+                          onPressed: () => _message(f.profile),
+                        ),
+                        TRIconButton(
+                          icon: Icons.person_remove_outlined,
+                          tooltip: 'Remove',
+                          onPressed:
+                              () =>
+                                  _run(() => repo.remove(f.rel.id), 'Removed'),
+                        ),
+                      ],
+                    ),
+                  )
+                  .toList();
     } else if (_tab == 1) {
       rows = [
-        if (_incoming.isEmpty && _outgoing.isEmpty) const EmptyState(icon: Icons.mark_email_unread_outlined, title: 'No requests'),
+        if (_incoming.isEmpty && _outgoing.isEmpty)
+          const EmptyState(
+            icon: Icons.mark_email_unread_outlined,
+            title: 'No requests',
+          ),
         for (final r in _incoming)
-          _PersonTile(profile: r.profile, subtitle: 'Wants to be friends', actions: [
-            TRButton(label: 'Accept', onPressed: () => _run(() => repo.setStatus(r.rel.id, 'accepted'), 'Friend added')),
-            const SizedBox(width: 6),
-            TRButton(label: 'Decline', variant: TRButtonVariant.outline, onPressed: () => _run(() => repo.remove(r.rel.id), 'Declined')),
-          ]),
+          _PersonTile(
+            profile: r.profile,
+            subtitle: 'Wants to be friends',
+            actions: [
+              TRButton(
+                label: 'Accept',
+                onPressed:
+                    () => _run(
+                      () => repo.setStatus(r.rel.id, 'accepted'),
+                      'Friend added',
+                    ),
+              ),
+              const SizedBox(width: 6),
+              TRButton(
+                label: 'Decline',
+                variant: TRButtonVariant.outline,
+                onPressed: () => _run(() => repo.remove(r.rel.id), 'Declined'),
+              ),
+            ],
+          ),
         for (final r in _outgoing)
-          _PersonTile(profile: r.profile, subtitle: 'Request sent', actions: [
-            TRButton(label: 'Cancel', variant: TRButtonVariant.ghost, onPressed: () => _run(() => repo.remove(r.rel.id), 'Cancelled')),
-          ]),
+          _PersonTile(
+            profile: r.profile,
+            subtitle: 'Request sent',
+            actions: [
+              TRButton(
+                label: 'Cancel',
+                variant: TRButtonVariant.ghost,
+                onPressed: () => _run(() => repo.remove(r.rel.id), 'Cancelled'),
+              ),
+            ],
+          ),
       ];
     } else {
       rows = [
-        TRTextField(controller: _q, hint: 'Search by username or name', icon: Icons.search_rounded, onChanged: _search),
+        TRTextField(
+          controller: _q,
+          hint: 'Search by username or name',
+          icon: Icons.search_rounded,
+          onChanged: _search,
+        ),
         const SizedBox(height: 12),
         for (final p in _results)
-          _PersonTile(profile: p, actions: [
-            if (friendIds.contains(p.id))
-              Text('Connected', style: TRText.body(13, c.text3))
-            else
-              TRButton(label: 'Add', icon: Icons.person_add_alt_1_rounded, onPressed: () => _run(() => repo.sendRequest(p.id), 'Request sent')),
-          ]),
+          _PersonTile(
+            profile: p,
+            actions: [
+              if (friendIds.contains(p.id))
+                Text('Connected', style: TRText.body(13, c.text3))
+              else
+                TRButton(
+                  label: 'Add',
+                  icon: Icons.person_add_alt_1_rounded,
+                  onPressed:
+                      () => _run(() => repo.sendRequest(p.id), 'Request sent'),
+                ),
+            ],
+          ),
       ];
     }
 
@@ -126,66 +199,56 @@ class _ContactsPageState extends State<ContactsPage> {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Padding(
-              padding: EdgeInsets.fromLTRB(20, Responsive.isMobile(context) ? 16 : 28, 20, 16),
-              child: Text('Contacts', style: TRText.display(24, c.text1)),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: _Segmented(
-                labels: ['Friends (${_friends.length})', 'Requests${_incoming.isEmpty ? '' : ' (${_incoming.length})'}', 'Add'],
-                index: _tab,
-                onChanged: (i) => setState(() => _tab = i),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  Responsive.isMobile(context) ? 16 : 28,
+                  20,
+                  16,
+                ),
+                child: Text('Contacts', style: TRText.display(24, c.text1)),
               ),
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: _loading
-                  ? Center(child: CircularProgressIndicator(color: context.accent, strokeWidth: 2))
-                  : Scrollbar(
-                      child: ListView(
-                        padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + mobileBarClearance(context)),
-                        children: rows,
-                      ),
-                    ),
-            ),
-          ]),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: MatrixTabs(
+                  labels: [
+                    'Friends (${_friends.length})',
+                    'Requests${_incoming.isEmpty ? '' : ' (${_incoming.length})'}',
+                    'Add',
+                  ],
+                  selected: _tab,
+                  onChanged: (i) => setState(() => _tab = i),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child:
+                    _loading
+                        ? Center(
+                          child: CircularProgressIndicator(
+                            color: context.accent,
+                            strokeWidth: 2,
+                          ),
+                        )
+                        : Scrollbar(
+                          child: ListView(
+                            padding: EdgeInsets.fromLTRB(
+                              16,
+                              4,
+                              16,
+                              16 + mobileBarClearance(context),
+                            ),
+                            children: rows,
+                          ),
+                        ),
+              ),
+            ],
+          ),
         ),
       ),
-    );
-  }
-}
-
-class _Segmented extends StatelessWidget {
-  final List<String> labels;
-  final int index;
-  final ValueChanged<int> onChanged;
-  const _Segmented({required this.labels, required this.index, required this.onChanged});
-  @override
-  Widget build(BuildContext context) {
-    final c = context.tr;
-    return Container(
-      height: 44,
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(color: c.surface2, borderRadius: BorderRadius.circular(TRRadius.pill), border: Border.all(color: c.border)),
-      child: Row(children: [
-        for (var i = 0; i < labels.length; i++)
-          Expanded(
-            child: Hoverable(
-              onTap: () => onChanged(i),
-              builder: (_, h) => AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: i == index ? c.surface3 : (h ? c.text1.withValues(alpha: .04) : Colors.transparent),
-                  borderRadius: BorderRadius.circular(TRRadius.pill),
-                ),
-                child: Text(labels[i], style: TRText.body(13, i == index ? c.text1 : c.text2, w: FontWeight.w600)),
-              ),
-            ),
-          ),
-      ]),
     );
   }
 }
@@ -194,31 +257,63 @@ class _PersonTile extends StatelessWidget {
   final Profile profile;
   final String? subtitle;
   final List<Widget> actions;
-  const _PersonTile({required this.profile, this.subtitle, required this.actions});
+  const _PersonTile({
+    required this.profile,
+    this.subtitle,
+    required this.actions,
+  });
   @override
   Widget build(BuildContext context) {
     final c = context.tr;
     return Hoverable(
-      builder: (_, h) => Container(
-        margin: const EdgeInsets.symmetric(vertical: 3),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: h ? c.text1.withValues(alpha: .04) : c.surface1.withValues(alpha: .5),
-          borderRadius: BorderRadius.circular(TRRadius.x2l),
-          border: Border.all(color: c.border),
-        ),
-        child: Row(children: [
-          TRAvatar(name: profile.displayName, url: profile.avatarUrl, size: 44),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(profile.displayName, style: TRText.body(15, c.text1, w: FontWeight.w600)),
-              Text(subtitle ?? '@${profile.username}', style: TRText.body(13, c.text2)),
-            ]),
+      builder:
+          (_, h) => Container(
+            margin: const EdgeInsets.symmetric(vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: h ? c.surface2 : Colors.transparent,
+              borderRadius: BorderRadius.circular(TRRadius.x2l),
+              border: Border(bottom: BorderSide(color: c.border)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    TRAvatar(
+                      name: profile.displayName,
+                      url: profile.avatarUrl,
+                      size: 44,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            profile.displayName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TRText.body(15, c.text1, w: FontWeight.w600),
+                          ),
+                          Text(
+                            subtitle ?? '@${profile.username}',
+                            style: TRText.body(13, c.text2),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (MediaQuery.sizeOf(context).width >= 480) ...actions,
+                  ],
+                ),
+                if (MediaQuery.sizeOf(context).width < 480)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 56, top: 8),
+                    child: Wrap(spacing: 6, runSpacing: 6, children: actions),
+                  ),
+              ],
+            ),
           ),
-          ...actions,
-        ]),
-      ),
     );
   }
 }

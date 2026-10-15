@@ -1,13 +1,15 @@
 # TRMatrix – Build Guide
 
+For this repair, read **REPAIR-PART-2.md** and **REPAIR-PART-1.md** first: included changes, limits, validation and offline acceptance checks.
+
 All platform folders (android, ios, windows, linux, macos, web) are already included,
 with camera, microphone, notification, media and screen-share permissions set.
 
 ## 1. Install
-- Flutter SDK 3.24+ (https://docs.flutter.dev/get-started/install)
+- Flutter SDK 3.29+ (https://docs.flutter.dev/get-started/install)
 - Windows: Visual Studio 2022 with "Desktop development with C++"
 - Android: Android Studio + SDK
-- Linux: `sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev mpv`
+- Linux: `sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev mpv libsecret-1-dev libjsoncpp-dev`
 
 ## 2. Run
 ```

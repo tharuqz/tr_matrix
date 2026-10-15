@@ -1,3 +1,8 @@
+# TRMatrix — cumulative Flutter project
+
+This archive includes all five feature parts plus offline-chat repair Part 1 and visual repair Part 2.
+Start with **REPAIR-PART-2.md**, **REPAIR-PART-1.md** and **BUILD-GUIDE.md**. The historical notes below describe earlier parts, not verified feature parity.
+
 # TR MATRIX — Flutter app (Part 1 of 5)
 
 Connects to the same backend as trmatrix.top, so your existing accounts and chats work.

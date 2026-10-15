@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'tokens.dart';
 
@@ -15,11 +14,18 @@ class ThemeController extends ChangeNotifier {
   bool compact = false;
   bool hidePreviews = false;
 
-  double get textScale => switch (fontSize) { 'small' => .9, 'large' => 1.15, _ => 1.0 };
+  double get textScale => switch (fontSize) {
+    'small' => .9,
+    'large' => 1.15,
+    _ => 1.0,
+  };
 
   Future<void> load() async {
     final p = await SharedPreferences.getInstance();
-    mode = TRThemeMode.values.firstWhere((m) => m.name == p.getString('tr.mode'), orElse: () => TRThemeMode.dark);
+    mode = TRThemeMode.values.firstWhere(
+      (m) => m.name == p.getString('tr.mode'),
+      orElse: () => TRThemeMode.dark,
+    );
     followSystem = p.getBool('tr.system') ?? false;
     final a = p.getInt('tr.accent');
     if (a != null) accent = Color(a);
@@ -48,9 +54,9 @@ class ThemeController extends ChangeNotifier {
   }
 
   void setMode(TRThemeMode m) => _set(() {
-        mode = m;
-        followSystem = false;
-      });
+    mode = m;
+    followSystem = false;
+  });
   void setFollowSystem(bool v) => _set(() => followSystem = v);
   void setAccent(Color c) => _set(() => accent = c);
   void setFontSize(String v) => _set(() => fontSize = v);
@@ -60,14 +66,17 @@ class ThemeController extends ChangeNotifier {
 
   TRThemeMode get effectiveMode {
     if (!followSystem) return mode;
-    return WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.light ? TRThemeMode.light : TRThemeMode.dark;
+    return WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+            Brightness.light
+        ? TRThemeMode.light
+        : TRThemeMode.dark;
   }
 
   TRColors get colors => switch (effectiveMode) {
-        TRThemeMode.dark => TRColors.dark,
-        TRThemeMode.amoled => TRColors.amoled,
-        TRThemeMode.light => TRColors.light,
-      };
+    TRThemeMode.dark => TRColors.dark,
+    TRThemeMode.amoled => TRColors.amoled,
+    TRThemeMode.light => TRColors.light,
+  };
 }
 
 /// Theme extension so any widget can read `context.tr.surface2` etc.
@@ -77,29 +86,57 @@ class TRTheme extends ThemeExtension<TRTheme> {
   const TRTheme(this.c, this.accent);
 
   @override
-  TRTheme copyWith({TRColors? c, Color? accent}) => TRTheme(c ?? this.c, accent ?? this.accent);
+  TRTheme copyWith({TRColors? c, Color? accent}) =>
+      TRTheme(c ?? this.c, accent ?? this.accent);
   @override
   TRTheme lerp(TRTheme? other, double t) => other ?? this;
 }
 
 extension TRContext on BuildContext {
-  TRColors get tr => Theme.of(this).extension<TRTheme>()!.c;
-  Color get accent => Theme.of(this).extension<TRTheme>()!.accent;
+  TRColors get tr => Theme.of(this).extension<TRTheme>()?.c ?? TRColors.dark;
+  Color get accent =>
+      Theme.of(this).extension<TRTheme>()?.accent ?? TRAccent.defaultAccent;
 }
 
 /// Typography: Sora (display), Manrope (body), JetBrains Mono.
 class TRText {
-  static TextStyle display(double size, Color color, {FontWeight w = FontWeight.w700}) =>
-      GoogleFonts.sora(fontSize: size, fontWeight: w, color: color, letterSpacing: size * -0.02, height: 1.2);
-  static TextStyle body(double size, Color color, {FontWeight w = FontWeight.w400}) =>
-      GoogleFonts.manrope(fontSize: size, fontWeight: w, color: color, height: 1.45);
-  static TextStyle mono(double size, Color color) =>
-      GoogleFonts.jetBrainsMono(fontSize: size, color: color, letterSpacing: size * 0.04);
+  static TextStyle display(
+    double size,
+    Color color, {
+    FontWeight w = FontWeight.w700,
+  }) => TextStyle(
+    fontFamily: 'Sora',
+    fontSize: size,
+    fontWeight: w,
+    color: color,
+    letterSpacing: 0,
+    height: 1.2,
+  );
+  static TextStyle body(
+    double size,
+    Color color, {
+    FontWeight w = FontWeight.w400,
+  }) => TextStyle(
+    fontFamily: 'Manrope',
+    fontSize: size,
+    fontWeight: w,
+    color: color,
+    height: 1.45,
+  );
+  static TextStyle mono(double size, Color color) => TextStyle(
+    fontFamily: 'JetBrainsMono',
+    fontSize: size,
+    color: color,
+    letterSpacing: 0,
+  );
 }
 
 ThemeData buildTheme(ThemeController ctl) {
   final c = ctl.colors;
-  final brightness = ctl.effectiveMode == TRThemeMode.light ? Brightness.light : Brightness.dark;
+  final brightness =
+      ctl.effectiveMode == TRThemeMode.light
+          ? Brightness.light
+          : Brightness.dark;
   final base = ThemeData(brightness: brightness, useMaterial3: true);
   return base.copyWith(
     scaffoldBackgroundColor: c.bg,
@@ -116,8 +153,35 @@ ThemeData buildTheme(ThemeController ctl) {
       onPrimary: TRAccent.on(ctl.accent),
       error: c.danger,
     ),
-    textTheme: GoogleFonts.manropeTextTheme(base.textTheme).apply(bodyColor: c.text1, displayColor: c.text1),
+    textTheme: base.textTheme.apply(
+      fontFamily: 'Manrope',
+      bodyColor: c.text1,
+      displayColor: c.text1,
+    ),
     dividerColor: c.border,
+    appBarTheme: AppBarTheme(
+      backgroundColor: c.bg,
+      foregroundColor: c.text1,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+    ),
+    chipTheme: base.chipTheme.copyWith(
+      backgroundColor: c.surface2,
+      selectedColor: ctl.accent.withValues(alpha: .16),
+      side: BorderSide.none,
+      shape: const StadiumBorder(),
+      labelStyle: TRText.body(13, c.text2),
+    ),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: c.surface1,
+      surfaceTintColor: Colors.transparent,
+      showDragHandle: true,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(TRRadius.glass),
+        ),
+      ),
+    ),
     // Visible, web-style thin scrollbars.
     scrollbarTheme: ScrollbarThemeData(
       thumbVisibility: const WidgetStatePropertyAll(true),

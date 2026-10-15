@@ -1,6 +1,8 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../data/models.dart';
 import 'pin.dart';
 
@@ -35,13 +37,18 @@ class AuthService extends ChangeNotifier {
   bool get isSignedIn => session != null;
   bool get isAdmin => profile?.isAdmin ?? false;
 
-  static const _select = 'id, username, display_name, avatar_url, bio, is_admin, account_status';
+  static const _select =
+      'id, username, display_name, avatar_url, bio, is_admin, account_status';
 
   Future<void> _loadProfile(String uid) async {
     loading = true;
     notifyListeners();
     try {
-      final row = await _db.from('profiles').select(_select).eq('id', uid).maybeSingle();
+      final row = await _db
+          .from('profiles')
+          .select(_select)
+          .eq('id', uid)
+          .maybeSingle();
       if (row != null) {
         var p = Profile.fromJson(row);
         if (!p.isAdmin) {
@@ -65,7 +72,8 @@ class AuthService extends ChangeNotifier {
 
   /// Sign in with username + PIN/password (tries every email/password encoding).
   Future<String?> signIn(String username, String secret) async {
-    if (!Pin.isValidUsername(username)) return 'Username must be 3–20 letters, numbers or _';
+    if (!Pin.isValidUsername(username))
+      return 'Username must be 3–20 letters, numbers or _';
     final pws = Pin.candidatePasswords(secret);
     if (pws.isEmpty) return 'Enter your PIN or password';
     for (final email in Pin.loginEmails(username)) {
@@ -82,17 +90,28 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Sign up with username + PIN. Profile is created by the backend trigger.
-  Future<String?> signUp(String username, String displayName, String pin) async {
-    if (!Pin.isValidUsername(username)) return 'Username must be 3–20 letters, numbers or _';
+  Future<String?> signUp(
+    String username,
+    String displayName,
+    String pin,
+  ) async {
+    if (!Pin.isValidUsername(username))
+      return 'Username must be 3–20 letters, numbers or _';
     if (!Pin.isValidPin(pin)) return 'PIN must be 4–6 digits';
     try {
       final res = await _db.auth.signUp(
         email: Pin.pseudoEmail(username),
         password: Pin.padPin(pin),
-        data: {'username': Pin.normalize(username), 'display_name': displayName.isEmpty ? username : displayName},
+        data: {
+          'username': Pin.normalize(username),
+          'display_name': displayName.isEmpty ? username : displayName,
+        },
       );
       if (res.session == null) {
-        await _db.auth.signInWithPassword(email: Pin.pseudoEmail(username), password: Pin.padPin(pin));
+        await _db.auth.signInWithPassword(
+          email: Pin.pseudoEmail(username),
+          password: Pin.padPin(pin),
+        );
       }
       return null;
     } on AuthException catch (e) {
@@ -107,7 +126,7 @@ class AuthService extends ChangeNotifier {
     try {
       await beforeSignOut?.call();
     } catch (_) {}
-    await _db.auth.signOut();
+    await _db.auth.signOut(scope: SignOutScope.local);
   }
 
   @override

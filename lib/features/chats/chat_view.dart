@@ -1,12 +1,20 @@
+import 'dart:async';
+
+import '../../core/motion.dart';
+import '../../data/chat_repository.dart';
+
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+
 import '../zones/zone_page.dart';
 import '../../core/notifications.dart';
+
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:mime/mime.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../core/app_scope.dart';
 import '../../core/responsive.dart';
 import '../../core/theme/app_theme.dart';
@@ -32,7 +40,15 @@ class ChatView extends StatefulWidget {
   final VoidCallback? onBack;
   final VoidCallback? onToggleInfo;
   final void Function(String kind)? onCall;
-  const ChatView({super.key, required this.chatId, required this.title, this.avatarUrl, this.onBack, this.onToggleInfo, this.onCall});
+  const ChatView({
+    super.key,
+    required this.chatId,
+    required this.title,
+    this.avatarUrl,
+    this.onBack,
+    this.onToggleInfo,
+    this.onCall,
+  });
   @override
   State<ChatView> createState() => _ChatViewState();
 }
@@ -47,6 +63,9 @@ class _ChatViewState extends State<ChatView> {
   Message? _editing;
   RealtimeChannel? _channel;
   String? _boundChat;
+  ChatRepository? _repo;
+  StreamSubscription<String>? _cacheSub;
+  bool _sending = false;
   Map<String, List<String>> _reactions = {};
   Map<String, String> _myReactions = {};
   bool _isGroup = false;
@@ -70,58 +89,94 @@ class _ChatViewState extends State<ChatView> {
   void _bind() {
     NotificationService.instance?.activeChatId = widget.chatId;
     if (_boundChat == widget.chatId) return;
+    final oldId = _boundChat;
+    if (oldId != null) _repo?.drafts[oldId] = _input.text;
     _boundChat = widget.chatId;
     _channel?.unsubscribe();
-    _loading = true;
-    _messages = [];
+    _cacheSub?.cancel();
     _replyTo = _editing = null;
     final repo = AppScope.of(context).chats;
+    _repo = repo;
     final id = widget.chatId;
-    repo.loadMessages(id).then((m) {
+    _input.text = repo.drafts[id] ?? '';
+    _messages = repo.cachedMessages(id);
+    _loading =
+        _messages.isEmpty && !repo.store.has(repo.ownerId, 'messages:$id');
+    _cacheSub = repo.changes.listen((key) {
       if (!mounted || _boundChat != id) return;
-      setState(() {
-        _messages = m;
-        _loading = false;
-      });
-      repo.markRead(m);
-    }).catchError((_) {
-      if (mounted) setState(() => _loading = false);
+      if (key == id || key == '*')
+        setState(() {
+          _messages = repo.cachedMessages(id);
+          _loading = false;
+        });
     });
+    repo
+        .loadMessages(id)
+        .then((m) {
+          if (!mounted || _boundChat != id) return;
+          setState(() {
+            _messages = m;
+            _loading = false;
+          });
+          repo.markRead(m);
+        })
+        .catchError((_) {
+          if (mounted && _boundChat == id) setState(() => _loading = false);
+        });
     _loadReactions();
-    repo.chatRow(id).then((row) async {
-      if (!mounted || row == null) return;
-      setState(() {
-        _isGroup = row['is_group'] == true;
-        _wallpaper = row['wallpaper_url'] as String?;
-      });
-      if (_isGroup) {
-        final ms = await repo.groupMembers(id);
-        if (mounted) setState(() => _senders = {for (final m in ms) m.profile.id: m.profile});
-      }
-    }).catchError((_) {});
-    _channel = repo.subscribeChat(id, onUpsert: (msg) {
-      if (!mounted) return;
-      setState(() {
-        final i = _messages.indexWhere((x) => x.id == msg.id);
-        if (i >= 0) {
-          _messages = [..._messages]..[i] = msg;
-        } else {
-          _messages = [..._messages, msg];
-        }
-      });
-      repo.markRead([msg]);
-    }, onReactions: _loadReactions);
+    repo
+        .chatRow(id)
+        .then((row) async {
+          if (!mounted || _boundChat != id || row == null) return;
+          setState(() {
+            _isGroup = row['is_group'] == true;
+            _wallpaper = row['wallpaper_url'] as String?;
+          });
+          if (_isGroup) {
+            final ms = await repo.groupMembers(id);
+            if (mounted && _boundChat == id)
+              setState(
+                () => _senders = {for (final m in ms) m.profile.id: m.profile},
+              );
+          }
+        })
+        .catchError((_) {});
+    _channel = repo.subscribeChat(
+      id,
+      onUpsert: (msg) {
+        if (!mounted || _boundChat != id) return;
+        setState(() {
+          final i = _messages.indexWhere((x) => x.id == msg.id);
+          if (i >= 0) {
+            _messages = [..._messages]..[i] = msg;
+          } else {
+            _messages = [..._messages, msg];
+          }
+        });
+        repo.markRead([msg]);
+      },
+      onReactions: _loadReactions,
+    );
   }
 
   Future<void> _loadReactions() async {
-    final (all, mine) = await AppScope.of(context).chats.loadReactions(widget.chatId);
-    if (mounted) setState(() { _reactions = all; _myReactions = mine; });
+    final id = widget.chatId;
+    final (all, mine) = await AppScope.of(context).chats.loadReactions(id);
+    if (mounted && _boundChat == id)
+      setState(() {
+        _reactions = all;
+        _myReactions = mine;
+      });
   }
 
   @override
   void dispose() {
-    if (NotificationService.instance?.activeChatId == widget.chatId) NotificationService.instance?.activeChatId = null;
+    if (NotificationService.instance?.activeChatId == widget.chatId)
+      NotificationService.instance?.activeChatId = null;
     _channel?.unsubscribe();
+    _cacheSub?.cancel();
+    final id = _boundChat;
+    if (id != null) _repo?.drafts[id] = _input.text;
     _input.dispose();
     _focus.dispose();
     _scroll.dispose();
@@ -137,9 +192,15 @@ class _ChatViewState extends State<ChatView> {
     if (_editing != null) {
       final target = _editing!;
       setState(() {
-        _messages = _messages
-            .map((m) => m.id == target.id ? _copy(m, content: text, edited: true) : m)
-            .toList();
+        _messages =
+            _messages
+                .map(
+                  (m) =>
+                      m.id == target.id
+                          ? _copy(m, content: text, edited: true)
+                          : m,
+                )
+                .toList();
         _editing = null;
       });
       _input.clear();
@@ -150,34 +211,34 @@ class _ChatViewState extends State<ChatView> {
       }
       return;
     }
+    if (_sending) return;
+    _sending = true;
     final reply = _replyTo;
-    final tmp = Message(
-      id: 'tmp-${DateTime.now().microsecondsSinceEpoch}',
-      chatId: widget.chatId,
-      senderId: _me,
-      content: text,
-      createdAt: DateTime.now(),
-      replyToId: reply?.id,
-      pending: true,
-    );
-    setState(() {
-      _messages = [..._messages, tmp];
-      _replyTo = null;
-    });
-    _input.clear();
-    _focus.requestFocus();
+    final id = widget.chatId;
     try {
-      final real = await repo.sendText(widget.chatId, text, replyToId: reply?.id);
-      if (!mounted) return;
-      setState(() => _messages = [..._messages.where((m) => m.id != tmp.id && m.id != real.id), real]);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _messages = _messages.where((m) => m.id != tmp.id).toList());
-      showToast(context, 'Failed to send', error: true);
+      await repo.sendText(id, text, replyToId: reply?.id);
+      if (!mounted || _boundChat != id) return;
+      setState(() {
+        _messages = repo.cachedMessages(id);
+        _replyTo = null;
+      });
+      if (_input.text.trim() == text) _input.clear();
+      repo.drafts[id] = _input.text;
+      _focus.requestFocus();
+    } catch (_) {
+      if (mounted)
+        showToast(
+          context,
+          'Could not save message on this device. Your text is still here.',
+          error: true,
+        );
+    } finally {
+      _sending = false;
     }
   }
 
-  Message _copy(Message m, {String? content, bool? edited, bool? deleted}) => Message(
+  Message _copy(Message m, {String? content, bool? edited, bool? deleted}) =>
+      Message(
         id: m.id,
         chatId: m.chatId,
         senderId: m.senderId,
@@ -193,22 +254,38 @@ class _ChatViewState extends State<ChatView> {
       );
 
   /// Upload and send one file (photo, document, voice note or sticker).
-  Future<void> _sendFile(String name, Uint8List bytes, {String? mime, String? caption}) async {
+  Future<void> _sendFile(
+    String name,
+    Uint8List bytes, {
+    String? mime,
+    String? caption,
+  }) async {
     if (bytes.length > _maxUpload) {
       showToast(context, '$name is bigger than 50 MB', error: true);
       return;
     }
-    final type = mime ?? lookupMimeType(name, headerBytes: bytes) ?? 'application/octet-stream';
+    final type =
+        mime ??
+        lookupMimeType(name, headerBytes: bytes) ??
+        'application/octet-stream';
     final reply = _replyTo;
     setState(() {
       _uploading++;
       _replyTo = null;
     });
     try {
-      final real = await AppScope.of(context)
-          .chats
-          .sendMedia(widget.chatId, name: name, bytes: bytes, mime: type, caption: caption, replyToId: reply?.id);
-      if (mounted) setState(() => _messages = [..._messages.where((m) => m.id != real.id), real]);
+      final real = await AppScope.of(context).chats.sendMedia(
+        widget.chatId,
+        name: name,
+        bytes: bytes,
+        mime: type,
+        caption: caption,
+        replyToId: reply?.id,
+      );
+      if (mounted)
+        setState(
+          () => _messages = [..._messages.where((m) => m.id != real.id), real],
+        );
     } catch (_) {
       if (mounted) showToast(context, 'Could not send $name', error: true);
     } finally {
@@ -217,8 +294,11 @@ class _ChatViewState extends State<ChatView> {
   }
 
   Future<void> _pickFiles({bool images = false}) async {
-    final r = await FilePicker.platform
-        .pickFiles(allowMultiple: true, withData: true, type: images ? FileType.media : FileType.any);
+    final r = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+      type: images ? FileType.media : FileType.any,
+    );
     if (r == null) return;
     for (final f in r.files) {
       if (f.bytes != null) await _sendFile(f.name, f.bytes!);
@@ -231,49 +311,64 @@ class _ChatViewState extends State<ChatView> {
       context: context,
       backgroundColor: Colors.transparent,
       constraints: const BoxConstraints(maxWidth: 420),
-      builder: (ctx) => Container(
-        margin: const EdgeInsets.all(12),
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-            color: c.surface1, borderRadius: BorderRadius.circular(TRRadius.glass), border: Border.all(color: c.border)),
-        child: SafeArea(
-          top: false,
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Photos & videos'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _pickFiles(images: true);
-                }),
-            ListTile(
-                leading: const Icon(Icons.insert_drive_file_outlined),
-                title: const Text('File'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _pickFiles();
-                }),
-            ListTile(
-                leading: const Icon(Icons.emoji_emotions_outlined),
-                title: const Text('Sticker'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  setState(() => _stickers = true);
-                }),
-            ListTile(
-                leading: const Icon(Icons.wallpaper_rounded),
-                title: const Text('Chat wallpaper'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _openWallpaper();
-                }),
-          ]),
-        ),
-      ),
+      builder:
+          (ctx) => Container(
+            margin: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: c.surface1,
+              borderRadius: BorderRadius.circular(TRRadius.glass),
+              border: Border.all(color: c.border),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.photo_library_outlined),
+                    title: const Text('Photos & videos'),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _pickFiles(images: true);
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.insert_drive_file_outlined),
+                    title: const Text('File'),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _pickFiles();
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.emoji_emotions_outlined),
+                    title: const Text('Sticker'),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      setState(() => _stickers = true);
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.wallpaper_rounded),
+                    title: const Text('Chat wallpaper'),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _openWallpaper();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
     );
   }
 
-  void _openWallpaper() => showWallpaperPicker(context, widget.chatId, (p) => setState(() => _wallpaper = p));
+  void _openWallpaper() => showWallpaperPicker(
+    context,
+    widget.chatId,
+    (p) => setState(() => _wallpaper = p),
+  );
 
   Future<void> _react(Message m, String? emoji) async {
     final old = _myReactions[m.id];
@@ -318,17 +413,34 @@ class _ChatViewState extends State<ChatView> {
           case MsgAction.delete:
             final ok = await showDialog<bool>(
               context: context,
-              builder: (d) => AlertDialog(
-                title: const Text('Delete for everyone?'),
-                content: const Text('This message will be removed for everyone in the chat.'),
-                actions: [
-                  TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
-                  TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('Delete')),
-                ],
-              ),
+              builder:
+                  (d) => AlertDialog(
+                    title: const Text('Delete for everyone?'),
+                    content: const Text(
+                      'This message will be removed for everyone in the chat.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(d, false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(d, true),
+                        child: const Text('Delete'),
+                      ),
+                    ],
+                  ),
             );
             if (ok != true || !mounted) return;
-            setState(() => _messages = _messages.map((x) => x.id == m.id ? _copy(x, deleted: true) : x).toList());
+            setState(
+              () =>
+                  _messages =
+                      _messages
+                          .map(
+                            (x) => x.id == m.id ? _copy(x, deleted: true) : x,
+                          )
+                          .toList(),
+            );
             try {
               await AppScope.of(context).chats.deleteForEveryone(m.id);
             } catch (_) {
@@ -345,89 +457,163 @@ class _ChatViewState extends State<ChatView> {
     final me = AppScope.of(context).auth.user?.id;
     final reversed = _messages.reversed.toList();
 
-    Widget body = Column(children: [
-      _Header(
-        title: widget.title,
-        avatarUrl: widget.avatarUrl,
-        subtitle: _isGroup ? '${_senders.length} members · tap for info' : 'tap for info',
-        onBack: widget.onBack,
-        onTitle: _isGroup ? () => showGroupInfo(context, widget.chatId) : widget.onToggleInfo,
-        onInfo: widget.onToggleInfo,
-        onCall: widget.onCall,
-        onWallpaper: _openWallpaper,
-        onZone: () => openZone(context, widget.chatId, widget.title),
-      ),
-      if (_uploading > 0) LinearProgressIndicator(minHeight: 2, color: context.accent, backgroundColor: Colors.transparent),
-      Expanded(
-        child: _loading
-            ? Center(child: CircularProgressIndicator(color: context.accent, strokeWidth: 2))
-            : _messages.isEmpty
-                ? const EmptyState(icon: Icons.waving_hand_outlined, title: 'No messages yet', subtitle: 'Say hello!')
-                : Scrollbar(
+    Widget body = Column(
+      children: [
+        _Header(
+          title: widget.title,
+          avatarUrl: widget.avatarUrl,
+          subtitle: _isGroup ? '${_senders.length} members' : '',
+          onBack: widget.onBack,
+          onTitle:
+              _isGroup
+                  ? () => showGroupInfo(context, widget.chatId)
+                  : widget.onToggleInfo,
+          onInfo: widget.onToggleInfo,
+          onCall: widget.onCall,
+          onWallpaper: _openWallpaper,
+          onZone: () => openZone(context, widget.chatId, widget.title),
+        ),
+        if (AppScope.of(context).chats.offline ||
+            _messages.any((m) => m.pending))
+          Material(
+            color: context.tr.surface2,
+            child: ListTile(
+              dense: true,
+              leading: const Icon(Icons.cloud_off_outlined),
+              title: Text(
+                _messages.any((m) => m.pending)
+                    ? 'Messages waiting to send'
+                    : 'Offline · saved messages',
+              ),
+              trailing: IconButton(
+                tooltip: 'Retry connection',
+                icon: const Icon(Icons.refresh_rounded),
+                onPressed: () {
+                  final repo = AppScope.of(context).chats;
+                  repo.retryPending();
+                  repo.refreshMessages(widget.chatId);
+                },
+              ),
+            ),
+          ),
+        if (_uploading > 0)
+          LinearProgressIndicator(
+            minHeight: 2,
+            color: context.accent,
+            backgroundColor: Colors.transparent,
+          ),
+        Expanded(
+          child:
+              _loading
+                  ? Center(
+                    child: CircularProgressIndicator(
+                      color: context.accent,
+                      strokeWidth: 2,
+                    ),
+                  )
+                  : _messages.isEmpty
+                  ? const EmptyState(
+                    icon: Icons.waving_hand_outlined,
+                    title: 'No messages yet',
+                    subtitle: 'Say hello!',
+                  )
+                  : Scrollbar(
                     controller: _scroll,
                     child: ListView.builder(
                       controller: _scroll,
                       reverse: true,
-                      padding: EdgeInsets.symmetric(horizontal: mobile ? 10 : 24, vertical: 16),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: mobile ? 10 : 24,
+                        vertical: 16,
+                      ),
                       itemCount: reversed.length,
                       itemBuilder: (_, i) {
                         final m = reversed[i];
-                        final older = i + 1 < reversed.length ? reversed[i + 1] : null;
-                        final showDay = older == null || !DateUtils.isSameDay(older.createdAt, m.createdAt);
-                        final replied = m.replyToId == null ? null : _messages.where((x) => x.id == m.replyToId).firstOrNull;
-                        final showName = _isGroup && m.senderId != me && (older == null || older.senderId != m.senderId || showDay);
-                        return Column(children: [
-                          if (showDay) _DayDivider(m.createdAt),
-                          _Bubble(
-                            msg: m,
-                            mine: m.senderId == me,
-                            replied: replied,
-                            senderName: showName ? (_senders[m.senderId]?.displayName ?? 'Member') : null,
-                            reactions: _reactions[m.id] ?? const [],
-                            myReaction: _myReactions[m.id],
-                            onReply: () {
-                              setState(() => _replyTo = m);
-                              _focus.requestFocus();
-                            },
-                            onActions: () => _actions(m),
-                            onToggleReaction: (e) => _react(m, _myReactions[m.id] == e ? null : e),
+                        final older =
+                            i + 1 < reversed.length ? reversed[i + 1] : null;
+                        final showDay =
+                            older == null ||
+                            !DateUtils.isSameDay(older.createdAt, m.createdAt);
+                        final replied =
+                            m.replyToId == null
+                                ? null
+                                : _messages
+                                    .where((x) => x.id == m.replyToId)
+                                    .firstOrNull;
+                        final showName =
+                            _isGroup &&
+                            m.senderId != me &&
+                            (older == null ||
+                                older.senderId != m.senderId ||
+                                showDay);
+                        return MatrixReveal(
+                          key: ValueKey(m.id),
+                          child: Column(
+                            children: [
+                              if (showDay) _DayDivider(m.createdAt),
+                              _Bubble(
+                                msg: m,
+                                mine: m.senderId == me,
+                                replied: replied,
+                                senderName:
+                                    showName
+                                        ? (_senders[m.senderId]?.displayName ??
+                                            'Member')
+                                        : null,
+                                reactions: _reactions[m.id] ?? const [],
+                                myReaction: _myReactions[m.id],
+                                onReply: () {
+                                  setState(() => _replyTo = m);
+                                  _focus.requestFocus();
+                                },
+                                onActions: () => _actions(m),
+                                onToggleReaction:
+                                    (e) => _react(
+                                      m,
+                                      _myReactions[m.id] == e ? null : e,
+                                    ),
+                              ),
+                            ],
                           ),
-                        ]);
+                        );
                       },
                     ),
                   ),
-      ),
-      _Composer(
-        controller: _input,
-        focus: _focus,
-        replyTo: _replyTo,
-        editing: _editing,
-        recording: _recording,
-        showStickers: _stickers,
-        uid: me ?? '',
-        onCancelReply: () => setState(() {
-          _replyTo = null;
-          if (_editing != null) _input.clear();
-          _editing = null;
-        }),
-        onSend: _send,
-        onAttach: _attachMenu,
-        onMic: () => setState(() {
-          _recording = true;
-          _stickers = false;
-        }),
-        onToggleStickers: () => setState(() => _stickers = !_stickers),
-        onVoiceCancel: () => setState(() => _recording = false),
-        onVoiceSend: (n, b, t) {
-          setState(() => _recording = false);
-          _sendFile(n, b, mime: t);
-        },
-        onSticker: (s) {
-          setState(() => _stickers = false);
-          _sendFile(s.name, s.bytes, mime: s.mime);
-        },
-      ),
-    ]);
+        ),
+        _Composer(
+          controller: _input,
+          focus: _focus,
+          replyTo: _replyTo,
+          editing: _editing,
+          recording: _recording,
+          showStickers: _stickers,
+          uid: me ?? '',
+          onCancelReply:
+              () => setState(() {
+                _replyTo = null;
+                if (_editing != null) _input.clear();
+                _editing = null;
+              }),
+          onSend: _send,
+          onAttach: _attachMenu,
+          onMic:
+              () => setState(() {
+                _recording = true;
+                _stickers = false;
+              }),
+          onToggleStickers: () => setState(() => _stickers = !_stickers),
+          onVoiceCancel: () => setState(() => _recording = false),
+          onVoiceSend: (n, b, t) {
+            setState(() => _recording = false);
+            _sendFile(n, b, mime: t);
+          },
+          onSticker: (s) {
+            setState(() => _stickers = false);
+            _sendFile(s.name, s.bytes, mime: s.mime);
+          },
+        ),
+      ],
+    );
 
     // Drag files from the computer onto the chat to send them.
     body = DropTarget(
@@ -439,23 +625,30 @@ class _ChatViewState extends State<ChatView> {
           await _sendFile(f.name, await f.readAsBytes());
         }
       },
-      child: Stack(children: [
-        body,
-        if (_dragging)
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Container(
-                margin: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: context.accent.withValues(alpha: .12),
-                  borderRadius: BorderRadius.circular(TRRadius.glass),
-                  border: Border.all(color: context.accent, width: 2),
+      child: Stack(
+        children: [
+          body,
+          if (_dragging)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  margin: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: context.accent.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(TRRadius.glass),
+                    border: Border.all(color: context.accent, width: 2),
+                  ),
+                  child: Center(
+                    child: Text(
+                      'Drop files to send',
+                      style: TRText.display(22, context.tr.text1),
+                    ),
+                  ),
                 ),
-                child: Center(child: Text('Drop files to send', style: TRText.display(22, context.tr.text1))),
               ),
             ),
-          ),
-      ]),
+        ],
+      ),
     );
 
     body = CallbackShortcuts(
@@ -492,37 +685,133 @@ class _Header extends StatelessWidget {
   final String? avatarUrl;
   final VoidCallback? onBack, onInfo, onTitle, onWallpaper, onZone;
   final void Function(String kind)? onCall;
-  const _Header(
-      {required this.title, required this.subtitle, this.avatarUrl, this.onBack, this.onInfo, this.onCall, this.onTitle, this.onWallpaper, this.onZone});
+  const _Header({
+    required this.title,
+    required this.subtitle,
+    this.avatarUrl,
+    this.onBack,
+    this.onInfo,
+    this.onCall,
+    this.onTitle,
+    this.onWallpaper,
+    this.onZone,
+  });
   @override
   Widget build(BuildContext context) {
     final c = context.tr;
+    final compact = MediaQuery.sizeOf(context).width < 480;
     return Container(
-      padding: EdgeInsets.fromLTRB(onBack != null ? 4 : 20, MediaQuery.paddingOf(context).top + 10, 12, 10),
-      decoration: BoxDecoration(color: c.surface1.withValues(alpha: .7), border: Border(bottom: BorderSide(color: c.border))),
-      child: Row(children: [
-        if (onBack != null) TRIconButton(icon: Icons.arrow_back_rounded, tooltip: 'Back (Esc)', onPressed: onBack, size: 44),
-        Expanded(
-          child: Hoverable(
-            onTap: onTitle,
-            builder: (_, __) => Row(children: [
-              TRAvatar(name: title, url: avatarUrl, size: 40),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TRText.body(16, c.text1, w: FontWeight.w700)),
-                  Text(subtitle, style: TRText.body(12, c.text3)),
-                ]),
-              ),
-            ]),
+      padding: EdgeInsets.fromLTRB(
+        onBack != null ? 4 : 20,
+        MediaQuery.paddingOf(context).top + 10,
+        12,
+        10,
+      ),
+      decoration: BoxDecoration(
+        color: c.surface1.withValues(alpha: .7),
+        border: Border(bottom: BorderSide(color: c.border)),
+      ),
+      child: Row(
+        children: [
+          if (onBack != null)
+            TRIconButton(
+              icon: Icons.arrow_back_rounded,
+              tooltip: 'Back (Esc)',
+              onPressed: onBack,
+              size: 44,
+            ),
+          Expanded(
+            child: Hoverable(
+              onTap: onTitle,
+              builder:
+                  (_, __) => Row(
+                    children: [
+                      TRAvatar(name: title, url: avatarUrl, size: 40),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TRText.body(
+                                16,
+                                c.text1,
+                                w: FontWeight.w700,
+                              ),
+                            ),
+                            if (subtitle.isNotEmpty)
+                              Text(
+                                subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TRText.body(12, c.text3),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+            ),
           ),
-        ),
-        TRIconButton(icon: Icons.call_outlined, tooltip: 'Voice call', onPressed: onCall == null ? null : () => onCall!('voice')),
-        TRIconButton(icon: Icons.videocam_outlined, tooltip: 'Video call', onPressed: onCall == null ? null : () => onCall!('video')),
-        TRIconButton(icon: Icons.headphones_rounded, tooltip: 'Zone', onPressed: onZone),
-        TRIconButton(icon: Icons.wallpaper_rounded, tooltip: 'Wallpaper', onPressed: onWallpaper),
-        if (onInfo != null) TRIconButton(icon: Icons.info_outline_rounded, tooltip: 'Chat info', onPressed: onInfo),
-      ]),
+          TRIconButton(
+            icon: Icons.call_outlined,
+            tooltip: 'Voice call',
+            onPressed: onCall == null ? null : () => onCall!('voice'),
+          ),
+          if (!compact)
+            TRIconButton(
+              icon: Icons.videocam_outlined,
+              tooltip: 'Video call',
+              onPressed: onCall == null ? null : () => onCall!('video'),
+            ),
+          TRIconButton(
+            icon: Icons.headphones_rounded,
+            tooltip: 'Zone',
+            onPressed: onZone,
+          ),
+          if (!compact)
+            TRIconButton(
+              icon: Icons.wallpaper_rounded,
+              tooltip: 'Wallpaper',
+              onPressed: onWallpaper,
+            ),
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            icon: Icon(Icons.more_horiz_rounded, color: c.text2),
+            onSelected: (value) {
+              switch (value) {
+                case 'video':
+                  onCall?.call('video');
+                case 'wallpaper':
+                  onWallpaper?.call();
+                case 'info':
+                  onInfo?.call();
+              }
+            },
+            itemBuilder:
+                (_) => [
+                  if (compact)
+                    const PopupMenuItem(
+                      value: 'video',
+                      child: Text('Video call'),
+                    ),
+                  if (compact)
+                    const PopupMenuItem(
+                      value: 'wallpaper',
+                      child: Text('Wallpaper'),
+                    ),
+                  if (onInfo != null)
+                    const PopupMenuItem(
+                      value: 'info',
+                      child: Text('Chat info'),
+                    ),
+                ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -534,16 +823,21 @@ class _DayDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.tr;
     final now = DateTime.now();
-    final label = DateUtils.isSameDay(d, now)
-        ? 'Today'
-        : DateUtils.isSameDay(d, now.subtract(const Duration(days: 1)))
+    final label =
+        DateUtils.isSameDay(d, now)
+            ? 'Today'
+            : DateUtils.isSameDay(d, now.subtract(const Duration(days: 1)))
             ? 'Yesterday'
             : DateFormat('EEEE, d MMM y').format(d);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        decoration: BoxDecoration(color: c.surface2, borderRadius: BorderRadius.circular(TRRadius.pill), border: Border.all(color: c.border)),
+        decoration: BoxDecoration(
+          color: c.surface2,
+          borderRadius: BorderRadius.circular(TRRadius.pill),
+          border: Border.all(color: c.border),
+        ),
         child: Text(label, style: TRText.body(12, c.text2, w: FontWeight.w600)),
       ),
     );
@@ -582,128 +876,252 @@ class _Bubble extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final c = context.tr, a = context.accent;
-    final sticker = !msg.deleted && isStickerName(msg.mediaName);
-    final fg = sticker ? c.text1 : (mine ? TRAccent.on(a) : c.text1);
-    final maxW = MediaQuery.sizeOf(context).width * (Responsive.isMobile(context) ? .78 : .5);
-    final hasMedia = !msg.deleted && msg.mediaUrl != null;
-    final text = msg.deleted ? 'This message was deleted' : msg.content;
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final c = context.tr, a = context.accent;
+      final sticker = !msg.deleted && isStickerName(msg.mediaName);
+      final fg = c.text1;
+      final maxW = (constraints.maxWidth -
+              (Responsive.isMobile(context) ? 32 : 72))
+          .clamp(0.0, 520.0);
+      final hasMedia = !msg.deleted && msg.mediaUrl != null;
+      final text = msg.deleted ? 'This message was deleted' : msg.content;
 
-    final counts = <String, int>{};
-    for (final e in reactions) {
-      counts[e] = (counts[e] ?? 0) + 1;
-    }
+      final counts = <String, int>{};
+      for (final e in reactions) {
+        counts[e] = (counts[e] ?? 0) + 1;
+      }
 
-    final content = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-      if (senderName != null)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 3),
-          child: Text(senderName!, style: TRText.body(12, a, w: FontWeight.w700)),
-        ),
-      if (replied != null && !msg.deleted)
-        Container(
-          margin: const EdgeInsets.only(bottom: 6),
-          padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
-          decoration: BoxDecoration(
-            color: fg.withValues(alpha: .1),
-            borderRadius: BorderRadius.circular(TRRadius.sm),
-            border: Border(left: BorderSide(color: fg.withValues(alpha: .6), width: 3)),
-          ),
-          child: Text(_replyLabel(replied!), maxLines: 2, overflow: TextOverflow.ellipsis, style: TRText.body(12, fg.withValues(alpha: .8))),
-        ),
-      if (hasMedia) Padding(padding: EdgeInsets.only(bottom: text == null ? 0 : 6), child: Attachment(msg: msg, fg: fg)),
-      if (text != null)
-        SelectableText(text,
-            style: TRText.body(15, msg.deleted ? fg.withValues(alpha: .6) : fg).copyWith(fontStyle: msg.deleted ? FontStyle.italic : null)),
-      const SizedBox(height: 2),
-      Row(mainAxisSize: MainAxisSize.min, children: [
-        if (msg.edited && !msg.deleted) Text('edited · ', style: TRText.body(10, fg.withValues(alpha: .6))),
-        Text(DateFormat.Hm().format(msg.createdAt), style: TRText.body(10, fg.withValues(alpha: .7))),
-        if (mine) ...[
-          const SizedBox(width: 4),
-          Icon(msg.pending ? Icons.schedule_rounded : Icons.done_all_rounded, size: 13, color: fg.withValues(alpha: .75)),
-        ],
-      ]),
-    ]);
-
-    final box = Container(
-      margin: const EdgeInsets.symmetric(vertical: 2),
-      padding: sticker ? const EdgeInsets.all(2) : const EdgeInsets.fromLTRB(12, 9, 12, 7),
-      decoration: sticker
-          ? null
-          : BoxDecoration(
-              color: mine ? a : c.bubbleIn,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(TRRadius.x2l),
-                topRight: const Radius.circular(TRRadius.x2l),
-                bottomLeft: Radius.circular(mine ? TRRadius.x2l : 6),
-                bottomRight: Radius.circular(mine ? 6 : TRRadius.x2l),
-              ),
-              boxShadow: TRShadow.md(Colors.black.withValues(alpha: .4)),
-            ),
-      child: content,
-    );
-
-    final bubble = Hoverable(
-      builder: (_, h) => Row(
-        mainAxisAlignment: mine ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.center,
+      final content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          if (mine && h && !msg.deleted) ...[
-            TRIconButton(icon: Icons.more_horiz_rounded, tooltip: 'More', size: 30, onPressed: onActions),
-            TRIconButton(icon: Icons.reply_rounded, tooltip: 'Reply', size: 30, onPressed: onReply),
-          ],
-          ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: maxW),
-            child: Column(
-              crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+          if (senderName != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Text(
+                senderName!,
+                style: TRText.body(12, a, w: FontWeight.w700),
+              ),
+            ),
+          if (replied != null && !msg.deleted)
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+              decoration: BoxDecoration(
+                color: fg.withValues(alpha: .1),
+                borderRadius: BorderRadius.circular(TRRadius.sm),
+                border: Border(
+                  left: BorderSide(color: fg.withValues(alpha: .6), width: 3),
+                ),
+              ),
+              child: Text(
+                _replyLabel(replied!),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TRText.body(12, fg.withValues(alpha: .8)),
+              ),
+            ),
+          if (hasMedia)
+            Padding(
+              padding: EdgeInsets.only(bottom: text == null ? 0 : 6),
+              child: Attachment(msg: msg, fg: fg),
+            ),
+          if (text != null)
+            SelectableText(
+              text,
+              style: TRText.body(
+                15,
+                msg.deleted ? fg.withValues(alpha: .6) : fg,
+              ).copyWith(fontStyle: msg.deleted ? FontStyle.italic : null),
+            ),
+          const SizedBox(height: 2),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (msg.edited && !msg.deleted)
+                Text(
+                  'edited · ',
+                  style: TRText.body(10, fg.withValues(alpha: .6)),
+                ),
+              Text(
+                DateFormat('HH:mm').format(msg.createdAt),
+                style: TRText.body(10, fg.withValues(alpha: .7)),
+              ),
+              if (mine) ...[
+                const SizedBox(width: 4),
+                Icon(
+                  msg.pending ? Icons.schedule_rounded : Icons.done_all_rounded,
+                  size: 13,
+                  color: fg.withValues(alpha: .75),
+                ),
+              ],
+            ],
+          ),
+        ],
+      );
+
+      final box = Container(
+        margin: const EdgeInsets.symmetric(vertical: 2),
+        padding:
+            sticker
+                ? const EdgeInsets.all(2)
+                : const EdgeInsets.fromLTRB(12, 9, 12, 7),
+        decoration:
+            sticker
+                ? null
+                : BoxDecoration(
+                  color:
+                      mine
+                          ? Color.alphaBlend(
+                            a.withValues(alpha: .20),
+                            c.surface1,
+                          )
+                          : c.bubbleIn,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(TRRadius.x2l),
+                    topRight: const Radius.circular(TRRadius.x2l),
+                    bottomLeft: Radius.circular(mine ? TRRadius.x2l : 6),
+                    bottomRight: Radius.circular(mine ? 6 : TRRadius.x2l),
+                  ),
+                ),
+        child: content,
+      );
+
+      final bubble = Hoverable(
+        builder:
+            (_, h) => Row(
+              mainAxisAlignment:
+                  mine ? MainAxisAlignment.end : MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                GestureDetector(onLongPress: onActions, onSecondaryTap: onActions, child: box),
-                if (counts.isNotEmpty && !msg.deleted)
-                  Wrap(spacing: 4, children: [
-                    for (final e in counts.entries)
-                      InkWell(
-                        borderRadius: BorderRadius.circular(TRRadius.pill),
-                        onTap: () => onToggleReaction(e.key),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: myReaction == e.key ? a.withValues(alpha: .25) : c.surface2,
-                            borderRadius: BorderRadius.circular(TRRadius.pill),
-                            border: Border.all(color: myReaction == e.key ? a : c.border),
+                if (mine && !Responsive.isMobile(context))
+                  SizedBox(
+                    width: 64,
+                    child: Visibility(
+                      visible: h && !msg.deleted,
+                      maintainSize: true,
+                      maintainAnimation: true,
+                      maintainState: true,
+                      child: Row(
+                        children: [
+                          TRIconButton(
+                            icon: Icons.more_horiz_rounded,
+                            tooltip: 'More',
+                            size: 30,
+                            onPressed: onActions,
                           ),
-                          child: Text(e.value > 1 ? '${e.key} ${e.value}' : e.key, style: TRText.body(13, c.text1)),
-                        ),
+                          TRIconButton(
+                            icon: Icons.reply_rounded,
+                            tooltip: 'Reply',
+                            size: 30,
+                            onPressed: onReply,
+                          ),
+                        ],
                       ),
-                  ]),
+                    ),
+                  ),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxW),
+                  child: Column(
+                    crossAxisAlignment:
+                        mine
+                            ? CrossAxisAlignment.end
+                            : CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GestureDetector(
+                        onLongPress: onActions,
+                        onSecondaryTap: onActions,
+                        child: box,
+                      ),
+                      if (counts.isNotEmpty && !msg.deleted)
+                        Wrap(
+                          spacing: 4,
+                          children: [
+                            for (final e in counts.entries)
+                              InkWell(
+                                borderRadius: BorderRadius.circular(
+                                  TRRadius.pill,
+                                ),
+                                onTap: () => onToggleReaction(e.key),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        myReaction == e.key
+                                            ? a.withValues(alpha: .25)
+                                            : c.surface2,
+                                    borderRadius: BorderRadius.circular(
+                                      TRRadius.pill,
+                                    ),
+                                    border: Border.all(
+                                      color: myReaction == e.key ? a : c.border,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    e.value > 1 ? '${e.key} ${e.value}' : e.key,
+                                    style: TRText.body(13, c.text1),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+                if (!mine && !Responsive.isMobile(context))
+                  SizedBox(
+                    width: 64,
+                    child: Visibility(
+                      visible: h && !msg.deleted,
+                      maintainSize: true,
+                      maintainAnimation: true,
+                      maintainState: true,
+                      child: Row(
+                        children: [
+                          TRIconButton(
+                            icon: Icons.reply_rounded,
+                            tooltip: 'Reply',
+                            size: 30,
+                            onPressed: onReply,
+                          ),
+                          TRIconButton(
+                            icon: Icons.more_horiz_rounded,
+                            tooltip: 'More',
+                            size: 30,
+                            onPressed: onActions,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
-          ),
-          if (!mine && h && !msg.deleted) ...[
-            TRIconButton(icon: Icons.reply_rounded, tooltip: 'Reply', size: 30, onPressed: onReply),
-            TRIconButton(icon: Icons.more_horiz_rounded, tooltip: 'More', size: 30, onPressed: onActions),
-          ],
-        ],
-      ),
-    );
+      );
 
-    return Dismissible(
-      key: ValueKey('swipe-${msg.id}'),
-      direction: DismissDirection.startToEnd,
-      confirmDismiss: (_) async {
-        HapticFeedback.lightImpact();
-        onReply();
-        return false;
-      },
-      background: Align(
-        alignment: Alignment.centerLeft,
-        child: Padding(padding: const EdgeInsets.only(left: 12), child: Icon(Icons.reply_rounded, color: c.text2)),
-      ),
-      child: bubble,
-    );
-  }
+      return Dismissible(
+        key: ValueKey('swipe-${msg.id}'),
+        direction: DismissDirection.startToEnd,
+        confirmDismiss: (_) async {
+          HapticFeedback.lightImpact();
+          onReply();
+          return false;
+        },
+        background: Align(
+          alignment: Alignment.centerLeft,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Icon(Icons.reply_rounded, color: c.text2),
+          ),
+        ),
+        child: bubble,
+      );
+    },
+  );
 }
 
 class _Composer extends StatelessWidget {
@@ -712,7 +1130,12 @@ class _Composer extends StatelessWidget {
   final Message? replyTo, editing;
   final bool recording, showStickers;
   final String uid;
-  final VoidCallback onCancelReply, onSend, onAttach, onMic, onToggleStickers, onVoiceCancel;
+  final VoidCallback onCancelReply,
+      onSend,
+      onAttach,
+      onMic,
+      onToggleStickers,
+      onVoiceCancel;
   final void Function(String, Uint8List, String) onVoiceSend;
   final void Function(LocalSticker) onSticker;
   const _Composer({
@@ -737,93 +1160,178 @@ class _Composer extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.tr;
     final mobile = Responsive.isMobile(context);
-    final banner = editing != null ? 'Editing message' : (replyTo != null ? 'Replying: ${_replyLabel(replyTo!)}' : null);
+    final banner =
+        editing != null
+            ? 'Editing message'
+            : (replyTo != null ? 'Replying: ${_replyLabel(replyTo!)}' : null);
     return Container(
-      padding: EdgeInsets.fromLTRB(12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
-      decoration: BoxDecoration(color: c.surface1.withValues(alpha: .8), border: Border(top: BorderSide(color: c.border))),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        if (showStickers && !recording) StickerPicker(uid: uid, onPick: onSticker),
-        if (banner != null && !recording)
-          Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-            decoration: BoxDecoration(
-              color: c.surface2,
-              borderRadius: BorderRadius.circular(TRRadius.lg),
-              border: Border(left: BorderSide(color: context.accent, width: 3)),
-            ),
-            child: Row(children: [
-              Icon(editing != null ? Icons.edit_outlined : Icons.reply_rounded, size: 16, color: c.text2),
-              const SizedBox(width: 8),
-              Expanded(child: Text(banner, maxLines: 1, overflow: TextOverflow.ellipsis, style: TRText.body(13, c.text2))),
-              TRIconButton(icon: Icons.close_rounded, tooltip: 'Cancel (Esc)', size: 30, onPressed: onCancelReply),
-            ]),
-          ),
-        if (recording)
-          VoiceRecorderBar(onCancel: onVoiceCancel, onSend: onVoiceSend)
-        else
-          Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            TRIconButton(icon: Icons.add_rounded, tooltip: 'Attach', size: mobile ? 46 : 40, onPressed: onAttach),
-            TRIconButton(
-                icon: Icons.emoji_emotions_outlined,
-                tooltip: 'Stickers',
-                size: mobile ? 46 : 40,
-                active: showStickers,
-                onPressed: onToggleStickers),
-            const SizedBox(width: 6),
-            Expanded(
-              child: CallbackShortcuts(
-                bindings: {const SingleActivator(LogicalKeyboardKey.enter): onSend},
-                child: TextField(
-                  controller: controller,
-                  focusNode: focus,
-                  minLines: 1,
-                  maxLines: 6,
-                  textInputAction: mobile ? TextInputAction.newline : TextInputAction.none,
-                  style: TRText.body(15, c.text1),
-                  cursorColor: context.accent,
-                  decoration: InputDecoration(
-                    hintText: 'Write a message…',
-                    hintStyle: TRText.body(15, c.text3),
-                    filled: true,
-                    fillColor: c.surface2,
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 18, vertical: mobile ? 14 : 12),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(TRRadius.x3l), borderSide: BorderSide(color: c.border)),
-                    enabledBorder:
-                        OutlineInputBorder(borderRadius: BorderRadius.circular(TRRadius.x3l), borderSide: BorderSide(color: c.border)),
-                    focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(TRRadius.x3l), borderSide: BorderSide(color: context.accent)),
-                  ),
+      padding: EdgeInsets.fromLTRB(
+        12,
+        8,
+        12,
+        8 + MediaQuery.paddingOf(context).bottom,
+      ),
+      decoration: BoxDecoration(
+        color: c.surface1.withValues(alpha: .8),
+        border: Border(top: BorderSide(color: c.border)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (showStickers && !recording)
+            StickerPicker(uid: uid, onPick: onSticker),
+          if (banner != null && !recording)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+              decoration: BoxDecoration(
+                color: c.surface2,
+                borderRadius: BorderRadius.circular(TRRadius.lg),
+                border: Border(
+                  left: BorderSide(color: context.accent, width: 3),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            // Mic when empty, send when there is text (like the website).
-            ValueListenableBuilder<TextEditingValue>(
-              valueListenable: controller,
-              builder: (_, v, __) {
-                final empty = v.text.trim().isEmpty && editing == null;
-                return Hoverable(
-                  tooltip: empty ? 'Record voice note' : 'Send (Enter)',
-                  onTap: empty ? onMic : onSend,
-                  builder: (_, h) => AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: mobile ? 48 : 44,
-                    height: mobile ? 48 : 44,
-                    decoration: BoxDecoration(
-                      color: context.accent,
-                      shape: BoxShape.circle,
-                      boxShadow: h ? TRShadow.glow(context.accent) : null,
-                    ),
-                    child: Icon(empty ? Icons.mic_rounded : (editing != null ? Icons.check_rounded : Icons.send_rounded),
-                        size: 20, color: TRAccent.on(context.accent)),
+              child: Row(
+                children: [
+                  Icon(
+                    editing != null ? Icons.edit_outlined : Icons.reply_rounded,
+                    size: 16,
+                    color: c.text2,
                   ),
-                );
-              },
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      banner,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TRText.body(13, c.text2),
+                    ),
+                  ),
+                  TRIconButton(
+                    icon: Icons.close_rounded,
+                    tooltip: 'Cancel (Esc)',
+                    size: 30,
+                    onPressed: onCancelReply,
+                  ),
+                ],
+              ),
             ),
-          ]),
-      ]),
+          if (recording)
+            VoiceRecorderBar(onCancel: onVoiceCancel, onSend: onVoiceSend)
+          else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                TRIconButton(
+                  icon: Icons.add_rounded,
+                  tooltip: 'Attach',
+                  size: mobile ? 46 : 40,
+                  onPressed: onAttach,
+                ),
+                if (!mobile)
+                  TRIconButton(
+                    icon: Icons.emoji_emotions_outlined,
+                    tooltip: 'Stickers',
+                    size: mobile ? 46 : 40,
+                    active: showStickers,
+                    onPressed: onToggleStickers,
+                  ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: CallbackShortcuts(
+                    bindings: {
+                      const SingleActivator(LogicalKeyboardKey.enter): onSend,
+                    },
+                    child: TextField(
+                      controller: controller,
+                      focusNode: focus,
+                      minLines: 1,
+                      maxLines: 6,
+                      textInputAction:
+                          mobile
+                              ? TextInputAction.newline
+                              : TextInputAction.none,
+                      style: TRText.body(15, c.text1),
+                      cursorColor: context.accent,
+                      decoration: InputDecoration(
+                        hintText: 'Write a message…',
+                        hintStyle: TRText.body(15, c.text3),
+                        filled: true,
+                        fillColor: c.surface2,
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: mobile ? 14 : 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(TRRadius.x3l),
+                          borderSide: BorderSide(color: c.border),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(TRRadius.x3l),
+                          borderSide: BorderSide(color: c.border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(TRRadius.x3l),
+                          borderSide: BorderSide(color: context.accent),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Mic when empty, send when there is text (like the website).
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: controller,
+                  builder: (_, v, __) {
+                    final empty = v.text.trim().isEmpty && editing == null;
+                    return Hoverable(
+                      tooltip: empty ? 'Record voice note' : 'Send (Enter)',
+                      onTap: empty ? onMic : onSend,
+                      builder:
+                          (_, h) => AnimatedContainer(
+                            duration: matrixDuration(context, 150),
+                            width: mobile ? 48 : 44,
+                            height: mobile ? 48 : 44,
+                            decoration: BoxDecoration(
+                              color: context.accent,
+                              shape: BoxShape.circle,
+                              boxShadow:
+                                  h ? TRShadow.glow(context.accent) : null,
+                            ),
+                            child: AnimatedSwitcher(
+                              duration: matrixDuration(context, 180),
+                              transitionBuilder:
+                                  (child, animation) => ScaleTransition(
+                                    scale: animation,
+                                    child: FadeTransition(
+                                      opacity: animation,
+                                      child: child,
+                                    ),
+                                  ),
+                              child: Icon(
+                                key: ValueKey(
+                                  empty
+                                      ? 'mic'
+                                      : (editing != null ? 'edit' : 'send'),
+                                ),
+                                empty
+                                    ? Icons.mic_rounded
+                                    : (editing != null
+                                        ? Icons.check_rounded
+                                        : Icons.send_rounded),
+                                size: 20,
+                                color: TRAccent.on(context.accent),
+                              ),
+                            ),
+                          ),
+                    );
+                  },
+                ),
+              ],
+            ),
+        ],
+      ),
     );
   }
 }
