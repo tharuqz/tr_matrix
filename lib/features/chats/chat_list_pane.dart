@@ -213,7 +213,7 @@ class _ChatTile extends StatelessWidget {
           (_, h) => AnimatedContainer(
             duration: matrixDuration(context, 180),
             margin: const EdgeInsets.symmetric(vertical: 2),
-            padding: const EdgeInsets.symmetric(
+            padding: EdgeInsets.symmetric(
               horizontal: 12,
               vertical: AppScope.of(context).theme.compact ? 9 : 14,
             ),
