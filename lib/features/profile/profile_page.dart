@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:mime/mime.dart';
@@ -8,6 +9,10 @@ import '../../core/fancy.dart';
 import '../../core/responsive.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/tokens.dart';
+import '../../widgets/avatar_crop_dialog.dart';
+import '../settings/devices_section.dart';
+import '../../core/security/app_lock.dart';
+import '../security/lock_screen.dart';
 import '../../widgets/common.dart';
 import '../shell/app_shell.dart';
 
@@ -43,7 +48,7 @@ const _sections = [
     'privacy',
     'Privacy',
     Icons.lock_outline_rounded,
-    ['notification', 'preview', 'security'],
+    ['notification', 'preview', 'security', 'lock', 'pin', 'fingerprint'],
   ),
   ('about', 'About', Icons.info_outline_rounded, ['version', 'app']),
 ];
@@ -58,15 +63,14 @@ class _ProfilePageState extends State<ProfilePage> {
     final scope = AppScope.of(context);
     final mobile = Responsive.isMobile(context);
     final q = _search.text.trim().toLowerCase();
-    final items =
-        _sections
-            .where(
-              (s) =>
-                  q.isEmpty ||
-                  s.$2.toLowerCase().contains(q) ||
-                  s.$4.any((k) => k.contains(q)),
-            )
-            .toList();
+    final items = _sections
+        .where(
+          (s) =>
+              q.isEmpty ||
+              s.$2.toLowerCase().contains(q) ||
+              s.$4.any((k) => k.contains(q)),
+        )
+        .toList();
     final current = _section ?? (mobile ? null : 'profile');
 
     final menu = ListView(
@@ -77,8 +81,8 @@ class _ProfilePageState extends State<ProfilePage> {
         24 + mobileBarClearance(context),
       ),
       children: [
-        Text('Account', style: TRText.display(26, c.text1)),
-        const SizedBox(height: 16),
+        Text('Settings', style: TRText.display(24, c.text1)),
+        const SizedBox(height: 12),
         _IdentityCard(onEdit: () => setState(() => _section = 'profile')),
         const SizedBox(height: 16),
         TRTextField(
@@ -91,33 +95,33 @@ class _ProfilePageState extends State<ProfilePage> {
         for (final s in items)
           Hoverable(
             onTap: () => setState(() => _section = s.$1),
-            builder:
-                (_, h) => Container(
-                  margin: const EdgeInsets.symmetric(vertical: 2),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 14,
+            builder: (_, h) => Container(
+              margin: const EdgeInsets.symmetric(vertical: 1),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              decoration: BoxDecoration(
+                color: current == s.$1
+                    ? context.accent.withValues(alpha: .12)
+                    : (h ? c.text1.withValues(alpha: .05) : Colors.transparent),
+                borderRadius: BorderRadius.circular(TRRadius.xl),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: context.accent.withValues(alpha: .14),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Icon(s.$3, color: context.accent, size: 18),
                   ),
-                  decoration: BoxDecoration(
-                    color:
-                        current == s.$1
-                            ? context.accent.withValues(alpha: .12)
-                            : (h
-                                ? c.text1.withValues(alpha: .05)
-                                : Colors.transparent),
-                    borderRadius: BorderRadius.circular(TRRadius.xl),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(s.$3, color: context.accent, size: 20),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Text(s.$2, style: TRText.body(15, c.text1)),
-                      ),
-                      Icon(Icons.chevron_right_rounded, color: c.text3),
-                    ],
-                  ),
-                ),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text(s.$2, style: TRText.body(15, c.text1))),
+                  if (mobile)
+                    Icon(Icons.chevron_right_rounded, color: c.text3),
+                ],
+              ),
+            ),
           ),
         if (items.isEmpty)
           Padding(
@@ -174,25 +178,24 @@ class _ProfilePageState extends State<ProfilePage> {
 
     return SafeArea(
       bottom: false,
-      child:
-          mobile
-              ? (current == null ? menu : detail(current))
-              : Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(width: 340, child: menu),
-                  VerticalDivider(width: 1, color: c.border),
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.topLeft,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 680),
-                        child: detail(current!),
-                      ),
+      child: mobile
+          ? (current == null ? menu : detail(current))
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(width: 300, child: menu),
+                VerticalDivider(width: 1, color: c.border),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 680),
+                      child: detail(current!),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
+            ),
     );
   }
 }
@@ -209,10 +212,7 @@ class _IdentityCard extends StatelessWidget {
       builder: (_, __) {
         final p = auth.profile;
         return Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: c.border)),
-          ),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           child: Row(
             children: [
               TRAvatar(
@@ -275,7 +275,9 @@ const _nameColors = [
 class _Style {
   String? fx;
   Color? color;
+  String font = 'normal';
   _Style(this.fx, this.color);
+  String apply(String t) => encodeFancy(applyFont(t, font), fx, color);
 }
 
 class _ProfileEditor extends StatefulWidget {
@@ -314,24 +316,38 @@ class _ProfileEditorState extends State<_ProfileEditor> {
     if (f?.bytes == null || !mounted) return;
     if (f!.size > 10 * 1024 * 1024)
       return showToast(context, 'Image must be under 10 MB.', error: true);
+    Uint8List bytes = f.bytes!;
+    // avatar-crop parity: show crop dialog before upload (512x512 JPEG)
+    if (mounted) {
+      bool cropped = false;
+      Uint8List? out;
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AvatarCropDialog(
+          bytes: bytes,
+          name: f.name,
+          onConfirm: (jpeg) async {
+            out = jpeg;
+            cropped = true;
+          },
+          onCancel: () => Navigator.pop(context),
+        ),
+      );
+      if (!cropped || out == null) return;
+      bytes = out!;
+    }
     setState(() => _uploading = true);
     try {
       final db = Supabase.instance.client;
-      final ext = (f.extension ?? 'png').toLowerCase().replaceAll(
-        RegExp(r'[^a-z0-9]'),
-        '',
-      );
-      final path = '$uid/avatar-${DateTime.now().millisecondsSinceEpoch}.$ext';
-      await db.storage
-          .from('avatars')
-          .uploadBinary(
+      final path = '$uid/avatar-${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await db.storage.from('avatars').uploadBinary(
             path,
-            f.bytes!,
-            fileOptions: FileOptions(
+            bytes,
+            fileOptions: const FileOptions(
               cacheControl: '3600',
               upsert: true,
-              contentType:
-                  lookupMimeType(f.name, headerBytes: f.bytes) ?? 'image/png',
+              contentType: 'image/jpeg',
             ),
           );
       await db.from('profiles').update({'avatar_url': path}).eq('id', uid);
@@ -356,24 +372,11 @@ class _ProfileEditorState extends State<_ProfileEditor> {
       );
     setState(() => _saving = true);
     try {
-      await Supabase.instance.client
-          .from('profiles')
-          .update({
-            'display_name': encodeFancy(
-              _name.text.trim(),
-              _nameStyle.fx,
-              _nameStyle.color,
-            ),
-            'bio':
-                _bio.text.trim().isEmpty
-                    ? null
-                    : encodeFancy(
-                      _bio.text.trim(),
-                      _bioStyle.fx,
-                      _bioStyle.color,
-                    ),
-          })
-          .eq('id', uid);
+      await Supabase.instance.client.from('profiles').update({
+        'display_name': _nameStyle.apply(_name.text.trim()),
+        'bio':
+            _bio.text.trim().isEmpty ? null : _bioStyle.apply(_bio.text.trim()),
+      }).eq('id', uid);
       await scope.auth.refreshProfile();
       if (mounted) showToast(context, 'Profile saved.');
     } catch (e) {
@@ -390,30 +393,55 @@ class _ProfileEditorState extends State<_ProfileEditor> {
       children: [
         Text(
           '$label colour',
-          style: TRText.body(12, c.text2, w: FontWeight.w600),
+          style: TRText.body(11, c.text3, w: FontWeight.w600),
         ),
         const SizedBox(height: 6),
         Wrap(
           spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            for (final col in _nameColors)
+            ChoiceChip(
+              label: Text(
+                'Auto',
+                style: TRText.body(
+                  12,
+                  st.color == null ? TRAccent.on(context.accent) : c.text1,
+                ),
+              ),
+              selected: st.color == null,
+              onSelected: (_) => setState(() => st.color = null),
+              backgroundColor: c.surface2,
+              selectedColor: context.accent,
+              side: BorderSide(color: c.border),
+              shape: const StadiumBorder(),
+            ),
+            for (final col in _nameColors.where((x) => x != null).cast<Color>())
               GestureDetector(
                 onTap: () => setState(() => st.color = col),
                 child: Container(
-                  width: 30,
-                  height: 30,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: col ?? c.surface3,
+                    color: col,
                     border: Border.all(
-                      color: st.color == col ? c.text1 : c.border,
-                      width: 2,
+                      color: st.color == col ? context.accent : c.border,
+                      width: st.color == col ? 2 : 1,
                     ),
+                    boxShadow: st.color == col
+                        ? [
+                            BoxShadow(
+                              color: context.accent.withValues(alpha: .5),
+                              blurRadius: 8,
+                              spreadRadius: 1,
+                            ),
+                          ]
+                        : null,
                   ),
-                  child:
-                      col == null
-                          ? Icon(Icons.block_rounded, size: 14, color: c.text3)
-                          : null,
+                  child: col == null
+                      ? Icon(Icons.block_rounded, size: 14, color: c.text3)
+                      : null,
                 ),
               ),
           ],
@@ -429,15 +457,67 @@ class _ProfileEditorState extends State<_ProfileEditor> {
           runSpacing: 6,
           children: [
             ChoiceChip(
-              label: const Text('None'),
+              label: Text(
+                'None',
+                style: TRText.body(
+                  12,
+                  st.fx == null ? TRAccent.on(context.accent) : c.text1,
+                ),
+              ),
               selected: st.fx == null,
               onSelected: (_) => setState(() => st.fx = null),
+              backgroundColor: c.surface2,
+              selectedColor: context.accent,
+              side: BorderSide.none,
+              shape: const StadiumBorder(),
             ),
             for (final fx in motionFx)
               ChoiceChip(
-                label: Text(motionLabels[fx]!),
+                label: Text(
+                  motionLabels[fx]!,
+                  style: TRText.body(
+                    12,
+                    st.fx == fx ? TRAccent.on(context.accent) : c.text1,
+                  ),
+                ),
                 selected: st.fx == fx,
                 onSelected: (_) => setState(() => st.fx = fx),
+                backgroundColor: c.surface2,
+                selectedColor: context.accent,
+                side: st.fx == fx
+                    ? BorderSide(color: context.accent.withValues(alpha: .5))
+                    : BorderSide.none,
+                shape: const StadiumBorder(),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          '$label font',
+          style: TRText.body(12, c.text2, w: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final f in fancyFonts)
+              ChoiceChip(
+                label: Text(
+                  applyFont(fontLabels[f]!, f),
+                  style: TRText.body(
+                    12,
+                    st.font == f ? TRAccent.on(context.accent) : c.text1,
+                  ),
+                ),
+                selected: st.font == f,
+                onSelected: (_) => setState(() => st.font = f),
+                backgroundColor: c.surface2,
+                selectedColor: context.accent,
+                side: st.font == f
+                    ? BorderSide(color: context.accent.withValues(alpha: .5))
+                    : BorderSide.none,
+                shape: const StadiumBorder(),
               ),
           ],
         ),
@@ -471,20 +551,17 @@ class _ProfileEditorState extends State<_ProfileEditor> {
                     onTap: _uploading ? null : _pickAvatar,
                     child: Padding(
                       padding: const EdgeInsets.all(8),
-                      child:
-                          _uploading
-                              ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                              : Icon(
-                                Icons.photo_camera_outlined,
-                                size: 18,
-                                color: TRAccent.on(context.accent),
-                              ),
+                      child: _uploading
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              Icons.photo_camera_outlined,
+                              size: 18,
+                              color: TRAccent.on(context.accent),
+                            ),
                     ),
                   ),
                 ),
@@ -542,16 +619,12 @@ class _ProfileEditorState extends State<_ProfileEditor> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               FancyText(
-                encodeFancy(
-                  _name.text.isEmpty ? 'Your name' : _name.text,
-                  _nameStyle.fx,
-                  _nameStyle.color,
-                ),
+                _nameStyle.apply(_name.text.isEmpty ? 'Your name' : _name.text),
                 style: TRText.display(18, c.text1),
               ),
               if (_bio.text.isNotEmpty)
                 FancyText(
-                  encodeFancy(_bio.text, _bioStyle.fx, _bioStyle.color),
+                  _bioStyle.apply(_bio.text),
                   style: TRText.body(14, c.text2),
                   maxLines: 5,
                 ),
@@ -578,14 +651,19 @@ class _Card extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.tr;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: c.border)),
-      ),
+    final rows = <Widget>[];
+    for (var i = 0; i < children.length; i++) {
+      if (i > 0) {
+        rows.add(Divider(
+            height: 1, thickness: 1, color: c.border.withValues(alpha: .5)));
+      }
+      rows.add(children[i]);
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: children,
+        children: rows,
       ),
     );
   }
@@ -600,23 +678,34 @@ class _Row extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.tr;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        runSpacing: 8,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(label, style: TRText.body(14, c.text1)),
-              if (hint != null) Text(hint!, style: TRText.body(12, c.text3)),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: LayoutBuilder(builder: (_, box) {
+        final text = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: TRText.body(14, c.text1, w: FontWeight.w500)),
+            if (hint != null) ...[
+              const SizedBox(height: 2),
+              Text(hint!, style: TRText.body(12, c.text3)),
             ],
-          ),
-          child,
-        ],
-      ),
+          ],
+        );
+                // Only small toggles sit beside the label; bigger pickers go below.
+        if (child is! Switch || box.maxWidth < 280) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [text, const SizedBox(height: 8), child],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: text),
+            const SizedBox(width: 16),
+            child,
+          ],
+        );
+      }),
     );
   }
 }
@@ -653,20 +742,30 @@ class _Appearance extends StatelessWidget {
         'Accent',
         Wrap(
           spacing: 8,
+          runSpacing: 8,
           children: [
             for (final s in TRAccent.swatches)
               GestureDetector(
                 onTap: () => t.setAccent(s),
                 child: Container(
-                  width: 32,
-                  height: 32,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: s,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: t.accent == s ? c.text1 : Colors.transparent,
-                      width: 2,
+                      color: t.accent == s ? context.accent : c.border,
+                      width: t.accent == s ? 2 : 1,
                     ),
+                    boxShadow: t.accent == s
+                        ? [
+                            BoxShadow(
+                              color: context.accent.withValues(alpha: .5),
+                              blurRadius: 8,
+                              spreadRadius: 1,
+                            ),
+                          ]
+                        : null,
                   ),
                 ),
               ),
@@ -726,13 +825,21 @@ class _Privacy extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = AppScope.of(context).theme;
-    return _Card([
-      _Row(
-        'Hide notification previews',
-        Switch(value: t.hidePreviews, onChanged: t.setHidePreviews),
-        hint: 'Notifications will say "New message" instead of the text.',
-      ),
-    ]);
+    return Column(
+      children: [
+        _Card([
+          _Row(
+            'Hide notification previews',
+            Switch(value: t.hidePreviews, onChanged: t.setHidePreviews),
+            hint: 'Notifications will say "New message" instead of the text.',
+          ),
+        ]),
+        const SizedBox(height: 16),
+        const _AppLockCard(),
+        const SizedBox(height: 16),
+        const _Card([_Row('Active devices', DevicesSection())]),
+      ],
+    );
   }
 }
 
@@ -744,5 +851,119 @@ class _About extends StatelessWidget {
       _Row('App', Text('TR MATRIX')),
       _Row('Version', Text(appVersion)),
     ]);
+  }
+}
+
+class _AppLockCard extends StatelessWidget {
+  const _AppLockCard();
+  @override
+  Widget build(BuildContext context) {
+    final c = context.tr;
+    return ListenableBuilder(
+      listenable: AppLock.instance,
+      builder: (context, _) {
+        final l = AppLock.instance;
+        const times = [
+          (0, 'Immediately'),
+          (1, 'After 1 min'),
+          (5, 'After 5 min'),
+          (15, 'After 15 min'),
+          (60, 'After 1 hour'),
+        ];
+        return _Card([
+          _Row(
+            'App lock',
+            Switch(
+              value: l.enabled,
+              onChanged: (on) async {
+                if (on) {
+                  if (await showSetPinDialog(context) && context.mounted)
+                    showToast(context, 'App lock is on');
+                } else if (await confirmUnlock(
+                  context,
+                  title: 'Turn off app lock',
+                )) {
+                  await l.disable();
+                  if (context.mounted) showToast(context, 'App lock is off');
+                }
+              },
+            ),
+            hint:
+                'Ask for a PIN every time TR MATRIX opens. Saved on this device only.',
+          ),
+          if (l.enabled) ...[
+            _Row(
+              'Lock after',
+              DropdownButton<int>(
+                value:
+                    times.any((t) => t.$1 == l.timeoutMin) ? l.timeoutMin : 0,
+                underline: const SizedBox.shrink(),
+                dropdownColor: c.surface1,
+                items: [
+                  for (final t in times)
+                    DropdownMenuItem(
+                      value: t.$1,
+                      child: Text(t.$2, style: TRText.body(13, c.text1)),
+                    ),
+                ],
+                onChanged: (v) => l.setTimeout(v ?? 0),
+              ),
+            ),
+            if (l.biometricAvailable)
+              _Row(
+                'Unlock with fingerprint',
+                Switch(
+                  value: l.biometricSetting,
+                  onChanged: (on) async {
+                    final ok = await l.setBiometric(on);
+                    if (!ok && on && context.mounted)
+                      showToast(
+                        context,
+                        'Fingerprint not confirmed',
+                        error: true,
+                      );
+                  },
+                ),
+                hint:
+                    'Optional. Use your fingerprint (or Windows Hello) instead of typing the PIN.',
+              )
+            else
+              _Row(
+                'Fingerprint',
+                Text(
+                  'Not available on this device',
+                  style: TRText.body(12, c.text3),
+                ),
+              ),
+            _Row(
+              'Change PIN',
+              TextButton(
+                onPressed: () async {
+                  if (await confirmUnlock(
+                        context,
+                        title: 'Enter current PIN',
+                      ) &&
+                      context.mounted) {
+                    if (await showSetPinDialog(context) && context.mounted)
+                      showToast(context, 'PIN changed');
+                  }
+                },
+                child: const Text('Change'),
+              ),
+            ),
+            _Row(
+              'Lock now',
+              TextButton(onPressed: l.lockNow, child: const Text('Lock')),
+            ),
+          ],
+          _Row(
+            'Locked chats',
+            Text('${l.lockedChats.length}', style: TRText.body(13, c.text2)),
+            hint:
+                'Long-press a chat and choose "Lock & hide chat". Locked chats open only with your PIN or fingerprint.',
+          ),
+        ]);
+      },
+    );
   }
 }

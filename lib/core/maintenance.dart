@@ -22,14 +22,25 @@ class _MaintenanceGateState extends State<MaintenanceGate> {
     super.initState();
     _load();
     _ch = db
-        .channel('app_settings_maintenance:${DateTime.now().millisecondsSinceEpoch}')
-        .onPostgresChanges(event: PostgresChangeEvent.all, schema: 'public', table: 'app_settings', callback: (_) => _load())
+        .channel(
+          'app_settings_maintenance:${DateTime.now().millisecondsSinceEpoch}',
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'app_settings',
+          callback: (_) => _load(),
+        )
         .subscribe();
   }
 
   Future<void> _load() async {
     try {
-      final r = await db.from('app_settings').select('value').eq('key', 'maintenance_mode').maybeSingle();
+      final r = await db
+          .from('app_settings')
+          .select('value')
+          .eq('key', 'maintenance_mode')
+          .maybeSingle();
       if (mounted) setState(() => _on = r?['value'] == true);
     } catch (_) {}
   }
@@ -49,10 +60,20 @@ class _MaintenanceGateState extends State<MaintenanceGate> {
         if (!_on || !auth.isSignedIn || auth.isAdmin) return widget.child;
         return Material(
           color: context.tr.bg,
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const EmptyState(icon: Icons.construction_rounded, title: 'Down for maintenance', subtitle: "TR MATRIX is being updated. We'll be back soon."),
-            TextButton(onPressed: auth.signOut, child: const Text('Sign out')),
-          ]),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const EmptyState(
+                icon: Icons.construction_rounded,
+                title: 'Down for maintenance',
+                subtitle: "TR MATRIX is being updated. We'll be back soon.",
+              ),
+              TextButton(
+                onPressed: auth.signOut,
+                child: const Text('Sign out'),
+              ),
+            ],
+          ),
         );
       },
     );

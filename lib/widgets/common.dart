@@ -46,10 +46,9 @@ class _HoverableState extends State<Hoverable> {
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: widget.onTap,
-            onTapDown:
-                widget.onTap == null
-                    ? null
-                    : (_) => setState(() => _pressed = true),
+            onTapDown: widget.onTap == null
+                ? null
+                : (_) => setState(() => _pressed = true),
             onTapUp: (_) => setState(() => _pressed = false),
             onTapCancel: () => setState(() => _pressed = false),
             child: AnimatedScale(
@@ -139,12 +138,11 @@ class _TRAvatarState extends State<TRAvatar> {
   }
 
   String get _initials {
-    final parts =
-        widget.name
-            .trim()
-            .split(RegExp(r'\s+'))
-            .where((p) => p.isNotEmpty)
-            .toList();
+    final parts = widget.name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
     if (parts.isEmpty) return '?';
     return (parts.length == 1 ? parts.first[0] : parts[0][0] + parts[1][0])
         .toUpperCase();
@@ -257,10 +255,9 @@ class TRButton extends StatelessWidget {
             color: disabled ? bg.withValues(alpha: .5) : bg,
             borderRadius: BorderRadius.circular(TRRadius.pill),
             border: border,
-            boxShadow:
-                variant == TRButtonVariant.primary && h
-                    ? TRShadow.glow(a)
-                    : null,
+            boxShadow: variant == TRButtonVariant.primary && h
+                ? TRShadow.glow(a)
+                : null,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -311,26 +308,22 @@ class TRIconButton extends StatelessWidget {
     return Hoverable(
       tooltip: tooltip,
       onTap: onPressed,
-      builder:
-          (_, h) => AnimatedContainer(
-            duration: matrixDuration(context, 150),
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color:
-                  active
-                      ? context.accent.withValues(alpha: .16)
-                      : (h
-                          ? c.text1.withValues(alpha: .07)
-                          : Colors.transparent),
-            ),
-            child: Icon(
-              icon,
-              size: size * .5,
-              color: active ? context.accent : (h ? c.text1 : c.text2),
-            ),
-          ),
+      builder: (_, h) => AnimatedContainer(
+        duration: matrixDuration(context, 150),
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: active
+              ? context.accent.withValues(alpha: .16)
+              : (h ? c.text1.withValues(alpha: .07) : Colors.transparent),
+        ),
+        child: Icon(
+          icon,
+          size: size * .5,
+          color: active ? context.accent : (h ? c.text1 : c.text2),
+        ),
+      ),
     );
   }
 }
@@ -487,47 +480,48 @@ class MatrixTabs extends StatelessWidget {
   final List<String> labels;
   final int selected;
   final ValueChanged<int> onChanged;
+  final ValueChanged<int>? onLongPress;
   const MatrixTabs({
     super.key,
     required this.labels,
     required this.selected,
     required this.onChanged,
+    this.onLongPress,
   });
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 44,
-    child: ListView.separated(
-      scrollDirection: Axis.horizontal,
-      itemCount: labels.length,
-      separatorBuilder: (_, __) => const SizedBox(width: 6),
-      itemBuilder:
-          (_, i) => Hoverable(
-            onTap: () => onChanged(i),
-            builder:
-                (_, hovered) => AnimatedContainer(
-                  duration: matrixDuration(context, 180),
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  decoration: BoxDecoration(
-                    color:
-                        selected == i
-                            ? context.accent.withValues(alpha: .14)
-                            : (hovered
-                                ? context.tr.surface2
-                                : Colors.transparent),
-                    borderRadius: BorderRadius.circular(TRRadius.pill),
-                  ),
-                  child: Text(
-                    labels[i],
-                    maxLines: 1,
-                    style: TRText.body(
-                      13,
-                      selected == i ? context.accent : context.tr.text2,
-                      w: FontWeight.w600,
-                    ),
+        height: 44,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: labels.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 6),
+          itemBuilder: (_, i) => GestureDetector(
+            onLongPress: onLongPress == null ? null : () => onLongPress!(i),
+            onSecondaryTap: onLongPress == null ? null : () => onLongPress!(i),
+            child: Hoverable(
+              onTap: () => onChanged(i),
+              builder: (_, hovered) => AnimatedContainer(
+                duration: matrixDuration(context, 180),
+                alignment: Alignment.center,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: BoxDecoration(
+                  color: selected == i
+                      ? context.accent.withValues(alpha: .14)
+                      : (hovered ? context.tr.surface2 : Colors.transparent),
+                  borderRadius: BorderRadius.circular(TRRadius.pill),
+                ),
+                child: Text(
+                  labels[i],
+                  maxLines: 1,
+                  style: TRText.body(
+                    13,
+                    selected == i ? context.accent : context.tr.text2,
+                    w: FontWeight.w600,
                   ),
                 ),
+              ),
+            ),
           ),
-    ),
-  );
+        ),
+      );
 }

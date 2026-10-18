@@ -3,7 +3,10 @@
 class Pin {
   static const emailDomain = 'trmatrix-app.com';
   static const fallbackEmailDomain = 'trmatrix-fallback.com';
-  static const legacyEmailDomains = ['trmatrix.local', 'trmatrix.immediate.local'];
+  static const legacyEmailDomains = [
+    'trmatrix.local',
+    'trmatrix.immediate.local',
+  ];
   static const pinSalt = 'trmatrix.pin.v1';
   static final usernameRegex = RegExp(r'^[a-zA-Z0-9_]{3,20}$');
   static const adminUsernames = ['tharuka', 'trmain'];

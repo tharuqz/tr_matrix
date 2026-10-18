@@ -95,20 +95,16 @@ extension ChatActions on ChatRepository {
   // ---------- Edit / delete ----------
   Future<void> editMessage(String id, String text) => db
       .from('messages')
-      .update({'content': text, 'edited': true})
-      .eq('id', id);
+      .update({'content': text, 'edited': true}).eq('id', id);
 
-  Future<void> deleteForEveryone(String id) => db
-      .from('messages')
-      .update({
+  Future<void> deleteForEveryone(String id) => db.from('messages').update({
         'deleted': true,
         'content': null,
         'media_url': null,
         'media_name': null,
         'media_size': null,
         'media_type': null,
-      })
-      .eq('id', id);
+      }).eq('id', id);
 
   // ---------- Reactions ----------
   /// messageId -> list of emojis, plus my own emoji per message.
@@ -231,13 +227,13 @@ extension ChatActions on ChatRepository {
   }
 
   Future<void> addMembers(String chatId, List<String> ids) => db.rpc(
-    'add_group_members',
-    params: {'_chat_id': chatId, '_member_ids': ids},
-  );
+        'add_group_members',
+        params: {'_chat_id': chatId, '_member_ids': ids},
+      );
   Future<void> removeMember(String chatId, String userId) => db.rpc(
-    'remove_group_member',
-    params: {'_chat_id': chatId, '_user_id': userId},
-  );
+        'remove_group_member',
+        params: {'_chat_id': chatId, '_user_id': userId},
+      );
   Future<void> leaveGroup(String chatId) =>
       db.rpc('leave_group', params: {'_chat_id': chatId});
   Future<void> updateGroup(String chatId, String title, String? avatarUrl) =>
@@ -257,16 +253,11 @@ extension ChatActions on ChatRepository {
     Uint8List bytes,
     String mime,
   ) async {
-    final ext = name
-        .split('.')
-        .last
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final ext =
+        name.split('.').last.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
     final path =
         'chats/$chatId/wallpaper-${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await db.storage
-        .from(wallpaperBucket)
-        .uploadBinary(
+    await db.storage.from(wallpaperBucket).uploadBinary(
           path,
           bytes,
           fileOptions: FileOptions(contentType: mime, upsert: true),

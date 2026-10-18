@@ -6,7 +6,12 @@ import '../../widgets/common.dart';
 import 'call_controller.dart';
 
 /// Starts a voice/video call for any chat — 1:1 or group.
-Future<void> startCallForChat(BuildContext context, String chatId, ChatItem? item, String kind) async {
+Future<void> startCallForChat(
+  BuildContext context,
+  String chatId,
+  ChatItem? item,
+  String kind,
+) async {
   final scope = AppScope.of(context);
   final me = scope.auth.user?.id;
   if (me == null) return;
@@ -16,15 +21,25 @@ Future<void> startCallForChat(BuildContext context, String chatId, ChatItem? ite
     if (isGroup == null || (!isGroup && other == null)) {
       final row = await scope.chats.chatRow(chatId);
       isGroup = row?['is_group'] == true;
-      if (!isGroup) other = (row?['user_a'] == me) ? (row?['user_b'] as String?) : (row?['user_a'] as String?);
+      if (!isGroup)
+        other = (row?['user_a'] == me)
+            ? (row?['user_b'] as String?)
+            : (row?['user_a'] as String?);
     }
     if (isGroup) {
       final members = await scope.chats.groupMembers(chatId);
       await scope.calls.startGroupCall(
         chatId: chatId,
-        title: item?.title ?? 'Group',
+        title: item?.title ?? 'Hive',
         kind: kind,
-        members: [for (final m in members) GroupInvitee(m.profile.id, m.profile.displayName, m.profile.avatarUrl)],
+        members: [
+          for (final m in members)
+            GroupInvitee(
+              m.profile.id,
+              m.profile.displayName,
+              m.profile.avatarUrl,
+            ),
+        ],
       );
     } else if (other != null) {
       await scope.calls.startCall(
@@ -38,6 +53,7 @@ Future<void> startCallForChat(BuildContext context, String chatId, ChatItem? ite
       showToast(context, 'Could not find who to call', error: true);
     }
   } catch (e) {
-    if (context.mounted) showToast(context, 'Could not start call: $e', error: true);
+    if (context.mounted)
+      showToast(context, 'Could not start call: $e', error: true);
   }
 }

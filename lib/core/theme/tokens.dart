@@ -108,22 +108,22 @@ class TRRadius {
 
 class TRShadow {
   static List<BoxShadow> md(Color base) => [
-    BoxShadow(
-      color: base.withValues(alpha: .25),
-      blurRadius: 6,
-      offset: const Offset(0, 4),
-    ),
-    BoxShadow(
-      color: base.withValues(alpha: .15),
-      blurRadius: 4,
-      offset: const Offset(0, 2),
-    ),
-  ];
+        BoxShadow(
+          color: base.withValues(alpha: .25),
+          blurRadius: 6,
+          offset: const Offset(0, 4),
+        ),
+        BoxShadow(
+          color: base.withValues(alpha: .15),
+          blurRadius: 4,
+          offset: const Offset(0, 2),
+        ),
+      ];
   static List<BoxShadow> glow(Color accent) => [
-    BoxShadow(
-      color: accent.withValues(alpha: .35),
-      blurRadius: 24,
-      spreadRadius: -4,
-    ),
-  ];
+        BoxShadow(
+          color: accent.withValues(alpha: .35),
+          blurRadius: 24,
+          spreadRadius: -4,
+        ),
+      ];
 }

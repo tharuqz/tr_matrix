@@ -19,12 +19,11 @@ import '../chats/groups.dart';
 import '../chats/media/attachment.dart' show openImageViewer;
 import '../shell/app_shell.dart';
 
-String _err(Object e) =>
-    e is PostgrestException
+String _err(Object e) => e is PostgrestException
+    ? e.message
+    : (e is StorageException
         ? e.message
-        : (e is StorageException
-            ? e.message
-            : '$e'.replaceFirst('Exception: ', ''));
+        : '$e'.replaceFirst('Exception: ', ''));
 
 /// Hives — community feed + my Hives (groups) with activities. Port of hives-page.tsx.
 class HivesPage extends StatefulWidget {
@@ -67,17 +66,16 @@ class _HivesPageState extends State<HivesPage> {
   }
 
   void _showFeed() => setState(() {
-    _view = 'feed';
-    _selected = null;
-  });
+        _view = 'feed';
+        _selected = null;
+      });
 
   Widget _groupList() {
     final c = context.tr;
     final q = _searchCtl.text.toLowerCase();
-    final list =
-        (_groups ?? [])
-            .where((g) => g.title.toLowerCase().contains(q))
-            .toList();
+    final list = (_groups ?? [])
+        .where((g) => g.title.toLowerCase().contains(q))
+        .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -126,46 +124,34 @@ class _HivesPageState extends State<HivesPage> {
           ),
         for (final g in list)
           Hoverable(
-            onTap:
-                () => setState(() {
-                  _selected = g;
-                  _view = 'groups';
-                }),
-            builder:
-                (_, h) => Container(
-                  margin: const EdgeInsets.symmetric(vertical: 2),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 10,
+            onTap: () => setState(() {
+              _selected = g;
+              _view = 'groups';
+            }),
+            builder: (_, h) => Container(
+              margin: const EdgeInsets.symmetric(vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              decoration: BoxDecoration(
+                color: _selected?.id == g.id
+                    ? context.accent.withValues(alpha: .12)
+                    : (h ? c.text1.withValues(alpha: .05) : Colors.transparent),
+                borderRadius: BorderRadius.circular(TRRadius.x2l),
+              ),
+              child: Row(
+                children: [
+                  TRAvatar(name: g.title, url: g.avatarUrl, size: 38),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      g.title,
+                      overflow: TextOverflow.ellipsis,
+                      style: TRText.body(14, c.text1),
+                    ),
                   ),
-                  decoration: BoxDecoration(
-                    color:
-                        _selected?.id == g.id
-                            ? context.accent.withValues(alpha: .12)
-                            : (h
-                                ? c.text1.withValues(alpha: .05)
-                                : Colors.transparent),
-                    borderRadius: BorderRadius.circular(TRRadius.x2l),
-                  ),
-                  child: Row(
-                    children: [
-                      TRAvatar(name: g.title, url: g.avatarUrl, size: 38),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          g.title,
-                          overflow: TextOverflow.ellipsis,
-                          style: TRText.body(14, c.text1),
-                        ),
-                      ),
-                      Icon(
-                        Icons.chevron_right_rounded,
-                        color: c.text3,
-                        size: 18,
-                      ),
-                    ],
-                  ),
-                ),
+                  Icon(Icons.chevron_right_rounded, color: c.text3, size: 18),
+                ],
+              ),
+            ),
           ),
         if (_groups != null && list.isEmpty)
           Padding(
@@ -182,8 +168,7 @@ class _HivesPageState extends State<HivesPage> {
   @override
   Widget build(BuildContext context) {
     final c = context.tr;
-    final wide =
-        !Responsive.isMobile(context) &&
+    final wide = !Responsive.isMobile(context) &&
         MediaQuery.sizeOf(context).width >= 1000;
     final bottomPad = 24 + mobileBarClearance(context);
     Widget main;
@@ -427,10 +412,9 @@ class _FeedState extends State<_Feed> {
     final scope = AppScope.of(context);
     final canPost = scope.auth.isAdmin || !_locked;
     final me = scope.auth.user?.id;
-    final visible =
-        _posts
-            .where((p) => !p.expired && (_filter != 'mine' || p.authorId == me))
-            .toList();
+    final visible = _posts
+        .where((p) => !p.expired && (_filter != 'mine' || p.authorId == me))
+        .toList();
     return RefreshIndicator(
       onRefresh: () => _load(),
       child: ListView(
@@ -452,24 +436,23 @@ class _FeedState extends State<_Feed> {
               Expanded(
                 child: Hoverable(
                   onTap: canPost ? () => _compose() : null,
-                  builder:
-                      (_, h) => Container(
-                        height: 48,
-                        padding: const EdgeInsets.symmetric(horizontal: 18),
-                        alignment: Alignment.centerLeft,
-                        decoration: BoxDecoration(
-                          color: h && canPost ? c.surface3 : c.surface2,
-                          borderRadius: BorderRadius.circular(TRRadius.pill),
-                          border: Border.all(color: c.border),
-                        ),
-                        child: Text(
-                          canPost
-                              ? 'Share something with your friends…'
-                              : 'Posting is paused',
-                          style: TRText.body(14, c.text3),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
+                  builder: (_, h) => Container(
+                    height: 48,
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    alignment: Alignment.centerLeft,
+                    decoration: BoxDecoration(
+                      color: h && canPost ? c.surface3 : c.surface2,
+                      borderRadius: BorderRadius.circular(TRRadius.pill),
+                      border: Border.all(color: c.border),
+                    ),
+                    child: Text(
+                      canPost
+                          ? 'Share something with your friends…'
+                          : 'Posting is paused',
+                      style: TRText.body(14, c.text3),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ),
               ),
               TRIconButton(
@@ -522,10 +505,9 @@ class _FeedState extends State<_Feed> {
               height: 260,
               child: EmptyState(
                 icon: Icons.forum_outlined,
-                title:
-                    _filter == 'mine'
-                        ? 'Your moments belong here'
-                        : 'A little quiet here',
+                title: _filter == 'mine'
+                    ? 'Your moments belong here'
+                    : 'A little quiet here',
                 subtitle: canPost ? 'Share the first moment.' : null,
               ),
             )
@@ -630,23 +612,22 @@ class _PostCardState extends State<_PostCard> {
   Future<void> _delete() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder:
-          (d) => AlertDialog(
-            title: const Text('Delete post?'),
-            content: const Text(
-              'This removes the post and its attachments for everyone.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(d, false),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(d, true),
-                child: const Text('Delete'),
-              ),
-            ],
+      builder: (d) => AlertDialog(
+        title: const Text('Delete post?'),
+        content: const Text(
+          'This removes the post and its attachments for everyone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(d, false),
+            child: const Text('Cancel'),
           ),
+          TextButton(
+            onPressed: () => Navigator.pop(d, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
     );
     if (ok != true) return;
     try {
@@ -715,11 +696,10 @@ class _PostCardState extends State<_PostCard> {
                 PopupMenuButton<String>(
                   icon: Icon(Icons.more_horiz_rounded, color: c.text2),
                   onSelected: (v) => v == 'edit' ? widget.onEdit() : _delete(),
-                  itemBuilder:
-                      (_) => const [
-                        PopupMenuItem(value: 'edit', child: Text('Edit')),
-                        PopupMenuItem(value: 'delete', child: Text('Delete')),
-                      ],
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'edit', child: Text('Edit')),
+                    PopupMenuItem(value: 'delete', child: Text('Delete')),
+                  ],
                 ),
             ],
           ),
@@ -742,19 +722,17 @@ class _PostCardState extends State<_PostCard> {
                   borderRadius: BorderRadius.circular(TRRadius.pill),
                   onTap: () => _react(e),
                   child: AnimatedContainer(
-                    duration:
-                        MediaQuery.disableAnimationsOf(context)
-                            ? Duration.zero
-                            : const Duration(milliseconds: 150),
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 150),
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color:
-                          mine == e
-                              ? context.accent.withValues(alpha: .18)
-                              : c.surface2,
+                      color: mine == e
+                          ? context.accent.withValues(alpha: .18)
+                          : c.surface2,
                       borderRadius: BorderRadius.circular(TRRadius.pill),
                       border: Border.all(
                         color: mine == e ? context.accent : c.border,
@@ -894,25 +872,16 @@ class _Attachments extends StatelessWidget {
               for (final a in images)
                 FutureBuilder<String?>(
                   future: repo.mediaUrl(a.path),
-                  builder:
-                      (_, s) => ClipRRect(
-                        borderRadius: BorderRadius.circular(TRRadius.x2l),
-                        child:
-                            s.data == null
-                                ? Container(color: c.surface2)
-                                : GestureDetector(
-                                  onTap:
-                                      () => openImageViewer(
-                                        context,
-                                        s.data!,
-                                        a.name,
-                                      ),
-                                  child: Image.network(
-                                    s.data!,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                      ),
+                  builder: (_, s) => ClipRRect(
+                    borderRadius: BorderRadius.circular(TRRadius.x2l),
+                    child: s.data == null
+                        ? Container(color: c.surface2)
+                        : GestureDetector(
+                            onTap: () =>
+                                openImageViewer(context, s.data!, a.name),
+                            child: Image.network(s.data!, fit: BoxFit.cover),
+                          ),
+                  ),
                 ),
             ],
           ),
@@ -989,22 +958,16 @@ class _ComposerState extends State<_Composer> {
   @override
   void initState() {
     super.initState();
-    widget.repo
-        .friends()
-        .then((f) {
-          if (mounted) setState(() => _friends = f);
-        })
-        .catchError((_) {});
+    widget.repo.friends().then((f) {
+      if (mounted) setState(() => _friends = f);
+    }).catchError((_) {});
     final ed = widget.editing;
     if (ed != null) {
       if (ed.expiresAt == null) _duration = null;
-      widget.repo
-          .extras(ed.id)
-          .then((x) {
-            if (mounted && !_commentsChanged)
-              setState(() => _comments = x.commentsEnabled);
-          })
-          .catchError((_) {});
+      widget.repo.extras(ed.id).then((x) {
+        if (mounted && !_commentsChanged)
+          setState(() => _comments = x.commentsEnabled);
+      }).catchError((_) {});
     }
   }
 
@@ -1074,11 +1037,10 @@ class _ComposerState extends State<_Composer> {
           );
       }
       if (widget.editing != null) {
-        final removed =
-            widget.editing!.attachments
-                .where((a) => !_existing.any((x) => x.path == a.path))
-                .map((a) => a.path)
-                .toList();
+        final removed = widget.editing!.attachments
+            .where((a) => !_existing.any((x) => x.path == a.path))
+            .map((a) => a.path)
+            .toList();
         await widget.repo.removeFiles(removed);
       }
       if (mounted) {
@@ -1155,10 +1117,9 @@ class _ComposerState extends State<_Composer> {
                 for (final a in _existing)
                   InputChip(
                     label: Text(a.name),
-                    onDeleted:
-                        _busy
-                            ? null
-                            : () => setState(() => _existing.remove(a)),
+                    onDeleted: _busy
+                        ? null
+                        : () => setState(() => _existing.remove(a)),
                   ),
                 for (final f in _pending)
                   InputChip(
@@ -1200,13 +1161,9 @@ class _ComposerState extends State<_Composer> {
                     FilterChip(
                       label: Text(plainName(f.displayName)),
                       selected: _selected.contains(f.id),
-                      onSelected:
-                          (v) => setState(
-                            () =>
-                                v
-                                    ? _selected.add(f.id)
-                                    : _selected.remove(f.id),
-                          ),
+                      onSelected: (v) => setState(
+                        () => v ? _selected.add(f.id) : _selected.remove(f.id),
+                      ),
                     ),
                 ],
               ),
@@ -1240,18 +1197,16 @@ class _ComposerState extends State<_Composer> {
               contentPadding: EdgeInsets.zero,
               title: Text('Allow comments', style: TRText.body(14, c.text1)),
               value: _comments,
-              onChanged:
-                  (v) => setState(() {
-                    _comments = v;
-                    _commentsChanged = true;
-                  }),
+              onChanged: (v) => setState(() {
+                _comments = v;
+                _commentsChanged = true;
+              }),
             ),
             const SizedBox(height: 8),
             TRButton(
-              label:
-                  _busy
-                      ? (_progress.isEmpty ? 'Saving…' : _progress)
-                      : (widget.editing != null ? 'Save' : 'Share'),
+              label: _busy
+                  ? (_progress.isEmpty ? 'Saving…' : _progress)
+                  : (widget.editing != null ? 'Save' : 'Share'),
               loading: _busy,
               large: true,
               onPressed: _busy ? null : _submit,
@@ -1319,12 +1274,8 @@ class _ActivitiesState extends State<_Activities> {
   Future<void> _create() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder:
-          (_) => _NewActivity(
-            repo: widget.repo,
-            chatId: widget.hive.id,
-            kind: _kind,
-          ),
+      builder: (_) =>
+          _NewActivity(repo: widget.repo, chatId: widget.hive.id, kind: _kind),
     );
     if (ok == true) _load();
   }
@@ -1482,13 +1433,13 @@ class _NewActivityState extends State<_NewActivity> {
     final k = widget.kind;
     final label = _modes.firstWhere((m) => m.$1 == k).$2.toLowerCase();
     InputDecoration deco(String hint) => InputDecoration(
-      hintText: hint,
-      filled: true,
-      fillColor: c.surface2,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(TRRadius.xl),
-      ),
-    );
+          hintText: hint,
+          filled: true,
+          fillColor: c.surface2,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(TRRadius.xl),
+          ),
+        );
     return AlertDialog(
       backgroundColor: c.surface1,
       title: Text('New $label', style: TRText.display(18, c.text1)),
@@ -1523,10 +1474,9 @@ class _NewActivityState extends State<_NewActivity> {
                 ),
               if (k == 'capsule')
                 TRButton(
-                  label:
-                      _unlock == null
-                          ? 'Choose unlock time'
-                          : 'Unlocks ${DateFormat('MMM d, yyyy HH:mm').format(_unlock!)}',
+                  label: _unlock == null
+                      ? 'Choose unlock time'
+                      : 'Unlocks ${DateFormat('MMM d, yyyy HH:mm').format(_unlock!)}',
                   icon: Icons.lock_clock_outlined,
                   variant: TRButtonVariant.outline,
                   onPressed: _pickUnlock,
@@ -1541,10 +1491,9 @@ class _NewActivityState extends State<_NewActivity> {
           child: const Text('Cancel'),
         ),
         TRButton(
-          label:
-              _saving
-                  ? 'Publishing…'
-                  : (k == 'capsule' ? 'Seal capsule' : 'Publish'),
+          label: _saving
+              ? 'Publishing…'
+              : (k == 'capsule' ? 'Seal capsule' : 'Publish'),
           loading: _saving,
           onPressed: _saving ? null : _save,
         ),
@@ -1595,27 +1544,26 @@ class _ActivityCardState extends State<_ActivityCard> {
     final ctl = TextEditingController();
     final outcome = await showDialog<String>(
       context: context,
-      builder:
-          (d) => AlertDialog(
-            title: const Text('Record outcome'),
-            content: TextField(
-              controller: ctl,
-              maxLength: 1000,
-              minLines: 2,
-              maxLines: 6,
-              decoration: const InputDecoration(hintText: 'Final decision'),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(d),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(d, ctl.text.trim()),
-                child: const Text('Close decision'),
-              ),
-            ],
+      builder: (d) => AlertDialog(
+        title: const Text('Record outcome'),
+        content: TextField(
+          controller: ctl,
+          maxLength: 1000,
+          minLines: 2,
+          maxLines: 6,
+          decoration: const InputDecoration(hintText: 'Final decision'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(d),
+            child: const Text('Cancel'),
           ),
+          TextButton(
+            onPressed: () => Navigator.pop(d, ctl.text.trim()),
+            child: const Text('Close decision'),
+          ),
+        ],
+      ),
     );
     if (outcome == null || outcome.isEmpty) return;
     try {
@@ -1632,10 +1580,9 @@ class _ActivityCardState extends State<_ActivityCard> {
     final a = widget.a;
     final me = widget.repo.me;
     final rs = widget.responses;
-    String who(String id) =>
-        id == me
-            ? 'You'
-            : plainName(widget.people[id]?.displayName ?? 'Member');
+    String who(String id) => id == me
+        ? 'You'
+        : plainName(widget.people[id]?.displayName ?? 'Member');
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
@@ -1695,10 +1642,9 @@ class _ActivityCardState extends State<_ActivityCard> {
                       vertical: 12,
                     ),
                   ),
-                  onPressed:
-                      _busy || a.closedAt != null
-                          ? null
-                          : () => _respond(i, 'vote'),
+                  onPressed: _busy || a.closedAt != null
+                      ? null
+                      : () => _respond(i, 'vote'),
                   child: Row(
                     children: [
                       Expanded(
@@ -1734,10 +1680,9 @@ class _ActivityCardState extends State<_ActivityCard> {
                         '${who(r.userId)} · ${r.choice != null && r.choice! < a.items.length ? a.items[r.choice!] : ''}',
                         style: TRText.body(13, c.text1, w: FontWeight.w600),
                       ),
-                      subtitle:
-                          r.reason.isEmpty
-                              ? null
-                              : Text(r.reason, style: TRText.body(12, c.text2)),
+                      subtitle: r.reason.isEmpty
+                          ? null
+                          : Text(r.reason, style: TRText.body(12, c.text2)),
                     ),
                 ],
               ),
@@ -1779,10 +1724,9 @@ class _ActivityCardState extends State<_ActivityCard> {
                               14,
                               r?.done == true ? c.text3 : c.text1,
                             ).copyWith(
-                              decoration:
-                                  r?.done == true
-                                      ? TextDecoration.lineThrough
-                                      : null,
+                              decoration: r?.done == true
+                                  ? TextDecoration.lineThrough
+                                  : null,
                             ),
                           ),
                         ),
@@ -1794,10 +1738,9 @@ class _ActivityCardState extends State<_ActivityCard> {
                           )
                         else if (r.userId == me) ...[
                           FilledButton.tonal(
-                            onPressed:
-                                _busy
-                                    ? null
-                                    : () => _respond(
+                            onPressed: _busy
+                                ? null
+                                : () => _respond(
                                       i,
                                       r.done ? 'reopen' : 'complete',
                                     ),

@@ -8,7 +8,10 @@ class Ringer {
   final AudioPlayer _player = AudioPlayer(playerId: 'tr-ringer');
   Timer? _buzz;
 
-  bool get _phone => !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+  bool get _phone =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
 
   Future<void> startIncoming() async {
     await stop();
@@ -16,11 +19,16 @@ class Ringer {
       await _player.setReleaseMode(ReleaseMode.loop);
       await _player.play(AssetSource('sounds/ringtone.wav'), volume: 1);
     } catch (e) {
-      debugPrint('[ringer] $e'); // browsers may block sound until the page was clicked once
+      debugPrint(
+        '[ringer] $e',
+      ); // browsers may block sound until the page was clicked once
     }
     if (_phone) {
       HapticFeedback.heavyImpact();
-      _buzz = Timer.periodic(const Duration(milliseconds: 1400), (_) => HapticFeedback.heavyImpact());
+      _buzz = Timer.periodic(
+        const Duration(milliseconds: 1400),
+        (_) => HapticFeedback.heavyImpact(),
+      );
     }
   }
 

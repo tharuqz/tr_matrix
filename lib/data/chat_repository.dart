@@ -15,6 +15,10 @@ class ChatRepository {
   final String ownerId;
   final _changes = StreamController<String>.broadcast();
   final _refreshing = <String>{};
+
+  /// A refresh asked for while one was running: run once more afterwards so
+  /// the newest message / read state is never dropped.
+  bool _chatsDirty = false;
   final Map<String, String> drafts = {};
   final Map<String, Map<String, dynamic>> _details = {};
   late final OutboxWorker _worker;
@@ -91,11 +95,13 @@ class ChatRepository {
         'preview': pending.last['content'],
         'last_message_at': pending.last['created_at'],
       });
-    }).toList()..sort(
-      (a, b) => (b.lastMessageAt ?? DateTime(1970)).compareTo(
-        a.lastMessageAt ?? DateTime(1970),
-      ),
-    );
+    }).toList()
+      ..sort((a, b) {
+        if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+        return (b.lastMessageAt ?? DateTime(1970)).compareTo(
+          a.lastMessageAt ?? DateTime(1970),
+        );
+      });
   }
 
   Future<List<ChatItem>> loadChats() async {
@@ -109,7 +115,12 @@ class ChatRepository {
   }
 
   Future<void> refreshChats() async {
-    if (!_current || !_refreshing.add('chats')) return;
+    if (!_current) return;
+    if (!_refreshing.add('chats')) {
+      _chatsDirty = true;
+      return;
+    }
+    _chatsDirty = false;
     try {
       final items = await _fetchChats().timeout(const Duration(seconds: 12));
       if (!_current) return;
@@ -120,6 +131,10 @@ class ChatRepository {
     } finally {
       _refreshing.remove('chats');
       _emit('chats');
+    }
+    if (_chatsDirty && _current) {
+      _chatsDirty = false;
+      await refreshChats();
     }
   }
 
@@ -137,8 +152,9 @@ class ChatRepository {
     final key = 'messages:$chatId';
     if (!_current || !_refreshing.add(key)) return;
     try {
-      final rows = await _fetchMessages(chatId)
-          .timeout(const Duration(seconds: 12));
+      final rows = await _fetchMessages(
+        chatId,
+      ).timeout(const Duration(seconds: 12));
       if (!_current) return;
       await store.save(ownerId, key, rows);
       for (final row in rows) {
@@ -164,20 +180,20 @@ class ChatRepository {
   }
 
   static Map<String, dynamic> messageJson(Message m) => {
-    'id': m.id,
-    'chat_id': m.chatId,
-    'sender_id': m.senderId,
-    'content': m.content,
-    'media_url': m.mediaUrl,
-    'media_type': m.mediaType,
-    'media_name': m.mediaName,
-    'media_size': m.mediaSize,
-    'created_at': m.createdAt.toUtc().toIso8601String(),
-    'deleted': m.deleted,
-    'edited': m.edited,
-    'reply_to_id': m.replyToId,
-    'pending': m.pending,
-  };
+        'id': m.id,
+        'chat_id': m.chatId,
+        'sender_id': m.senderId,
+        'content': m.content,
+        'media_url': m.mediaUrl,
+        'media_type': m.mediaType,
+        'media_name': m.mediaName,
+        'media_size': m.mediaSize,
+        'created_at': m.createdAt.toUtc().toIso8601String(),
+        'deleted': m.deleted,
+        'edited': m.edited,
+        'reply_to_id': m.replyToId,
+        'pending': m.pending,
+      };
   Future<Map<String, dynamic>?> loadChatDetails(String chatId) async {
     await store.open(ownerId);
     final key = 'details:$chatId';
@@ -223,9 +239,9 @@ class ChatRepository {
           .eq('user_id', me),
     ]);
     final dm = List<Map<String, dynamic>>.from(results[0]);
-    final memberIds = List<Map<String, dynamic>>.from(results[1])
-        .map((r) => r['chat_id'] as String)
-        .toList();
+    final memberIds = List<Map<String, dynamic>>.from(
+      results[1],
+    ).map((r) => r['chat_id'] as String).toList();
     final states = {
       for (final s in List<Map<String, dynamic>>.from(results[2]))
         s['chat_id'] as String: s,
@@ -239,9 +255,10 @@ class ChatRepository {
     }
 
     final seen = <String>{};
-    final rows =
-        [...dm, ...groups].where((c) => seen.add(c['id'] as String)).toList()
-          ..removeWhere((c) => states[c['id']]?['hidden'] == true);
+    final rows = [...dm, ...groups]
+        .where((c) => seen.add(c['id'] as String))
+        .toList()
+      ..removeWhere((c) => states[c['id']]?['hidden'] == true);
     rows.sort(
       (a, b) => _ts(b['last_message_at']).compareTo(_ts(a['last_message_at'])),
     );
@@ -281,7 +298,7 @@ class ChatRepository {
         final cleared = states[id]?['cleared_at'] as String?;
         var q = db
             .from('messages')
-            .select('content, media_type, media_name, deleted')
+            .select('content, media_type, media_name, deleted, created_at')
             .eq('chat_id', id);
         if (cleared != null) q = q.gt('created_at', cleared);
         final last = List<Map<String, dynamic>>.from(
@@ -294,8 +311,9 @@ class ChatRepository {
             preview = 'Message deleted';
           } else if ((m['content'] as String?)?.isNotEmpty == true) {
             preview = m['content'] as String;
-          } else if (RegExp(r'^trmx-sticker-')
-              .hasMatch((m['media_name'] as String?) ?? '')) {
+          } else if (RegExp(
+            r'^trmx-sticker-',
+          ).hasMatch((m['media_name'] as String?) ?? '')) {
             preview = 'Sticker';
           } else if ((m['media_type'] as String?)?.startsWith('audio/') ==
               true) {
@@ -310,26 +328,24 @@ class ChatRepository {
         final unread = await _unread(id, cleared);
         final f = flags[id];
         final muteUntil = f?['muted_until'] as String?;
-        final muted =
-            muteUntil != null &&
+        final muted = muteUntil != null &&
             DateTime.parse(muteUntil).isAfter(DateTime.now());
 
         if (c['is_group'] == true) {
           return ChatItem(
             id: id,
             isGroup: true,
-            title: (c['title'] ?? 'Group') as String,
+            title: (c['title'] ?? 'Hive') as String,
             avatarUrl: c['avatar_url'] as String?,
             preview: preview,
-            lastMessageAt: _dt(c['last_message_at']),
+            lastMessageAt: _latest(c['last_message_at'], last),
             unread: unread,
             archived: f?['archived'] == true,
             muted: muted,
           );
         }
-        final other = c['user_a'] == me
-            ? c['user_b'] as String?
-            : c['user_a'] as String?;
+        final other =
+            c['user_a'] == me ? c['user_b'] as String? : c['user_a'] as String?;
         final p = other == null ? null : profiles[other];
         return ChatItem(
           id: id,
@@ -338,7 +354,7 @@ class ChatRepository {
           avatarUrl: p?.avatarUrl,
           otherUserId: other,
           preview: preview,
-          lastMessageAt: _dt(c['last_message_at']),
+          lastMessageAt: _latest(c['last_message_at'], last),
           unread: unread,
           archived: f?['archived'] == true,
           muted: muted,
@@ -416,11 +432,13 @@ class ChatRepository {
         .map((m) => m.id)
         .toList();
     if (ids.isEmpty) return;
+    await _clearUnreadLocal({
+      for (final m in msgs)
+        if (m.senderId != _me) m.chatId,
+    });
     final now = DateTime.now().toUtc().toIso8601String();
     try {
-      await db
-          .from('message_receipts')
-          .upsert(
+      await db.from('message_receipts').upsert(
             ids
                 .map(
                   (id) => {
@@ -434,6 +452,58 @@ class ChatRepository {
             onConflict: 'message_id,user_id',
           );
     } catch (_) {}
+  }
+
+  Future<Map<String, ({bool delivered, bool seen})>> fetchReceipts(
+    List<String> ids,
+  ) async {
+    if (ids.isEmpty) return {};
+    try {
+      final rows = List<Map<String, dynamic>>.from(
+        await db
+            .from('message_receipts')
+            .select('message_id, delivered_at, read_at, user_id')
+            .inFilter('message_id', ids),
+      );
+      final out = <String, ({bool delivered, bool seen})>{};
+      for (final r in rows) {
+        final mid = r['message_id'] as String;
+        if (r['user_id'] == _me) continue;
+        final del = r['delivered_at'] != null;
+        final seen = r['read_at'] != null;
+        final prev = out[mid];
+        out[mid] = (
+          delivered: (prev?.delivered ?? false) || del || seen,
+          seen: (prev?.seen ?? false) || seen,
+        );
+      }
+      return out;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> markChatReadRpc(String chatId) async {
+    try {
+      await db.rpc('mark_chat_read', params: {'_chat_id': chatId});
+    } catch (_) {}
+  }
+
+  RealtimeChannel subscribeReceipts(
+    void Function(Map<String, dynamic> row) onChange,
+  ) {
+    return db
+        .channel('receipts:$_me')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'message_receipts',
+          callback: (p) {
+            final rec = p.newRecord.isNotEmpty ? p.newRecord : p.oldRecord;
+            if (rec.isNotEmpty) onChange(rec);
+          },
+        )
+        .subscribe();
   }
 
   /// Realtime new messages in one chat.
@@ -467,6 +537,29 @@ class ChatRepository {
           table: 'messages',
           callback: (_) => onChange(),
         )
+        // My own read receipts (other devices / the website) update badges.
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'message_receipts',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: _me,
+          ),
+          callback: (_) => onChange(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'chat_state',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: _me,
+          ),
+          callback: (_) => onChange(),
+        )
         .subscribe();
   }
 
@@ -487,6 +580,32 @@ class ChatRepository {
         .select('id')
         .single();
     return row['id'] as String;
+  }
+
+  /// Newest of the chat's stored time and its real last message, so a chat
+  /// moves to the top even when `chats.last_message_at` lags behind.
+  static DateTime? _latest(dynamic chatTs, List<Map<String, dynamic>> last) {
+    final a = _dt(chatTs);
+    final b = last.isEmpty ? null : _dt(last.first['created_at']);
+    if (a == null) return b;
+    if (b == null) return a;
+    return b.isAfter(a) ? b : a;
+  }
+
+  /// Zero the cached unread badge right away after reading a chat.
+  Future<void> _clearUnreadLocal(Set<String> chatIds) async {
+    if (chatIds.isEmpty) return;
+    final rows = store.rows(ownerId, 'chats');
+    var changed = false;
+    for (var i = 0; i < rows.length; i++) {
+      if (chatIds.contains(rows[i]['id']) && (rows[i]['unread'] ?? 0) != 0) {
+        rows[i] = {...rows[i], 'unread': 0};
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    await store.save(ownerId, 'chats', rows);
+    _emit('chats');
   }
 
   static int _ts(dynamic v) =>

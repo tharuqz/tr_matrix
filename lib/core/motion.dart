@@ -15,14 +15,13 @@ class MatrixReveal extends StatelessWidget {
       tween: Tween(begin: 0, end: 1),
       duration: matrixDuration(context),
       curve: Curves.easeOutCubic,
-      builder:
-          (_, value, content) => Opacity(
-            opacity: value,
-            child: Transform.translate(
-              offset: Offset(0, 10 * (1 - value)),
-              child: content,
-            ),
-          ),
+      builder: (_, value, content) => Opacity(
+        opacity: value,
+        child: Transform.translate(
+          offset: Offset(0, 10 * (1 - value)),
+          child: content,
+        ),
+      ),
       child: child,
     );
   }
@@ -62,8 +61,7 @@ class _MatrixPageMotionState extends State<MatrixPageMotion>
   void didUpdateWidget(MatrixPageMotion old) {
     super.didUpdateWidget(old);
     if (old.trigger != widget.trigger &&
-        !MediaQuery.disableAnimationsOf(context))
-      _controller.forward(from: 0);
+        !MediaQuery.disableAnimationsOf(context)) _controller.forward(from: 0);
   }
 
   @override

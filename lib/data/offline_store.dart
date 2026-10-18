@@ -19,9 +19,8 @@ class OfflineStore {
   Future<void> _open(String uid) async {
     if (_users.containsKey(uid)) return;
     final raw = await read(uid);
-    _users[uid] = raw == null
-        ? {}
-        : Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    _users[uid] =
+        raw == null ? {} : Map<String, dynamic>.from(jsonDecode(raw) as Map);
   }
 
   Future<void> open(String uid) => _serial(uid, () => _open(uid));
@@ -51,21 +50,22 @@ class OfflineStore {
         await _commit(uid, {...?_users[uid], 'outbox': queue});
       });
   Future<void> acknowledge(String uid, String id) => _serial(uid, () async {
-    await _open(uid);
-    final queue = rows(uid, 'outbox');
-    if (!queue.any((r) => r['id'] == id)) return;
-    queue.removeWhere((r) => r['id'] == id);
-    await _commit(uid, {...?_users[uid], 'outbox': queue});
-  });
+        await _open(uid);
+        final queue = rows(uid, 'outbox');
+        if (!queue.any((r) => r['id'] == id)) return;
+        queue.removeWhere((r) => r['id'] == id);
+        await _commit(uid, {...?_users[uid], 'outbox': queue});
+      });
   List<Map<String, dynamic>> messages(String uid, String chatId) {
     final byId = {for (final r in rows(uid, 'messages:$chatId')) r['id']: r};
     for (final r in rows(uid, 'outbox').where((r) => r['chat_id'] == chatId)) {
       byId.putIfAbsent(r['id'], () => {...r, 'pending': true});
     }
-    return byId.values.toList()..sort(
-      (a, b) =>
-          (a['created_at'] as String).compareTo(b['created_at'] as String),
-    );
+    return byId.values.toList()
+      ..sort(
+        (a, b) =>
+            (a['created_at'] as String).compareTo(b['created_at'] as String),
+      );
   }
 
   Future<void> upsertMessage(String uid, Map<String, dynamic> row) =>
@@ -84,9 +84,9 @@ class OfflineStore {
         await _commit(uid, {...?_users[uid], key: current, 'outbox': queue});
       });
   Future<void> clear(String uid) => _serial(uid, () async {
-    await write(uid, null);
-    _users.remove(uid);
-  });
+        await write(uid, null);
+        _users.remove(uid);
+      });
 }
 
 /// One delivery at a time; failures leave durable pending text untouched.

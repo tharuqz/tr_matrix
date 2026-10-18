@@ -29,10 +29,9 @@ class _AuthPageState extends State<AuthPage> {
       _error = null;
     });
     final auth = AppScope.of(context).auth;
-    final err =
-        _signUp
-            ? await auth.signUp(_user.text, _name.text.trim(), _pin.text)
-            : await auth.signIn(_user.text, _pin.text);
+    final err = _signUp
+        ? await auth.signUp(_user.text, _name.text.trim(), _pin.text)
+        : await auth.signIn(_user.text, _pin.text);
     if (!mounted) return;
     setState(() {
       _busy = false;
@@ -125,11 +124,10 @@ class _AuthPageState extends State<AuthPage> {
         TRButton(
           label: _signUp ? 'I already have an account' : 'Create a new account',
           variant: TRButtonVariant.ghost,
-          onPressed:
-              () => setState(() {
-                _signUp = !_signUp;
-                _error = null;
-              }),
+          onPressed: () => setState(() {
+            _signUp = !_signUp;
+            _error = null;
+          }),
         ),
       ],
     );

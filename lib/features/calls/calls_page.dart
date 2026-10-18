@@ -67,17 +67,14 @@ class _CallsPageState extends State<CallsPage> {
                     'incoming',
                     'outgoing',
                   ].indexOf(_filter),
-                  onChanged:
-                      (i) => setState(
-                        () =>
-                            _filter =
-                                const [
-                                  'all',
-                                  'missed',
-                                  'incoming',
-                                  'outgoing',
-                                ][i],
-                      ),
+                  onChanged: (i) => setState(
+                    () => _filter = const [
+                      'all',
+                      'missed',
+                      'incoming',
+                      'outgoing',
+                    ][i],
+                  ),
                 ),
               ),
               Expanded(
@@ -94,13 +91,11 @@ class _CallsPageState extends State<CallsPage> {
                       );
                     }
                     var rows = snap.data ?? [];
-                    rows =
-                        rows.where((r) {
-                          if (_filter == 'all') return true;
-                          if (_filter == 'missed')
-                            return r['outcome'] == 'missed';
-                          return r['direction'] == _filter;
-                        }).toList();
+                    rows = rows.where((r) {
+                      if (_filter == 'all') return true;
+                      if (_filter == 'missed') return r['outcome'] == 'missed';
+                      return r['direction'] == _filter;
+                    }).toList();
                     if (rows.isEmpty) {
                       return const EmptyState(
                         icon: Icons.call_outlined,
@@ -126,10 +121,9 @@ class _CallsPageState extends State<CallsPage> {
                           final video = r['kind'] == 'video';
                           final group = (r['peer_name'] as String? ?? '')
                               .endsWith('(group)');
-                          final when =
-                              DateTime.tryParse(
-                                r['started_at'] ?? '',
-                              )?.toLocal();
+                          final when = DateTime.tryParse(
+                            r['started_at'] ?? '',
+                          )?.toLocal();
                           final dur = (r['duration_sec'] as num?)?.toInt() ?? 0;
                           final sub = [
                             out ? 'Outgoing' : 'Incoming',
@@ -194,18 +188,16 @@ class _CallsPageState extends State<CallsPage> {
                                 ),
                                 if (!group)
                                   TRIconButton(
-                                    icon:
-                                        video
-                                            ? Icons.videocam_outlined
-                                            : Icons.call_outlined,
+                                    icon: video
+                                        ? Icons.videocam_outlined
+                                        : Icons.call_outlined,
                                     tooltip: 'Call back',
-                                    onPressed:
-                                        () => calls.startCall(
-                                          chatId: r['chat_id'] ?? '',
-                                          peerUserId: r['peer_user_id'],
-                                          peerName: r['peer_name'] ?? 'Contact',
-                                          kind: video ? 'video' : 'voice',
-                                        ),
+                                    onPressed: () => calls.startCall(
+                                      chatId: r['chat_id'] ?? '',
+                                      peerUserId: r['peer_user_id'],
+                                      peerName: r['peer_name'] ?? 'Contact',
+                                      kind: video ? 'video' : 'voice',
+                                    ),
                                   ),
                               ],
                             ),

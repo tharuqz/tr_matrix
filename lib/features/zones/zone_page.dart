@@ -15,6 +15,8 @@ import '../calls/call_controller.dart'
     show isDesktopNative, canShareScreen, isPhone;
 import 'zone_controller.dart';
 import 'desktop_youtube_player.dart';
+import 'zone_session.dart';
+import 'zone_reactions.dart';
 
 /// The YouTube player works on Android, iPhone, Mac and web. Windows/Linux use the in-app desktop player.
 bool get _canEmbedYouTube =>
@@ -23,10 +25,15 @@ bool get _canEmbedYouTube =>
     defaultTargetPlatform == TargetPlatform.iOS ||
     defaultTargetPlatform == TargetPlatform.macOS;
 
-Future<void> openZone(BuildContext context, String chatId, String title) =>
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute(builder: (_) => ZonePage(chatId: chatId, title: title)),
-    );
+Future<void> openZone(BuildContext context, String chatId, String title) {
+  // Already showing this Zone: nothing to do.
+  if (ZoneSession.pageOpen.value) return Future.value();
+  return Navigator.of(context, rootNavigator: true).push(
+    MaterialPageRoute(
+      builder: (_) => ZonePage(chatId: chatId, title: title),
+    ),
+  );
+}
 
 class ZonePage extends StatefulWidget {
   final String chatId, title;
@@ -36,25 +43,27 @@ class ZonePage extends StatefulWidget {
 }
 
 class _ZonePageState extends State<ZonePage> {
-  late final ZoneController z = ZoneController(
-    Supabase.instance.client,
+  late final ActiveZone _session = ZoneSession.obtain(
     widget.chatId,
+    widget.title,
   );
+  ZoneController get z => _session.controller;
   final Map<String, Profile> _people = {};
   final _chat = TextEditingController(), _link = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    scheduleMicrotask(() => ZoneSession.pageOpen.value = true);
     z.addListener(_onChange);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onChange());
   }
 
   void _onChange() {
-    final missing =
-        z.participants
-            .map((p) => p.userId)
-            .where((id) => !_people.containsKey(id))
-            .toSet();
+    final missing = z.participants
+        .map((p) => p.userId)
+        .where((id) => !_people.containsKey(id))
+        .toSet();
     for (final m in z.messages) {
       if (!_people.containsKey(m.from)) missing.add(m.from);
     }
@@ -64,13 +73,13 @@ class _ZonePageState extends State<ZonePage> {
           .select('id, username, display_name, avatar_url')
           .inFilter('id', missing.toList())
           .then((rows) {
-            if (!mounted) return;
-            setState(() {
-              for (final r in rows) {
-                _people[r['id']] = Profile.fromJson(r);
-              }
-            });
-          });
+        if (!mounted) return;
+        setState(() {
+          for (final r in rows) {
+            _people[r['id']] = Profile.fromJson(r);
+          }
+        });
+      });
     }
     if (z.error != null) {
       final e = z.error!;
@@ -82,7 +91,12 @@ class _ZonePageState extends State<ZonePage> {
   @override
   void dispose() {
     z.removeListener(_onChange);
-    z.dispose();
+    // Still joined? Keep the Zone running and show the floating Zone bar.
+    final session = _session;
+    scheduleMicrotask(() {
+      ZoneSession.pageOpen.value = false;
+      ZoneSession.release(session);
+    });
     _chat.dispose();
     _link.dispose();
     super.dispose();
@@ -111,9 +125,15 @@ class _ZonePageState extends State<ZonePage> {
       backgroundColor: c.bg,
       appBar: AppBar(
         backgroundColor: c.surface1,
+        automaticallyImplyLeading: false,
+        leading: IconButton(
+          tooltip: 'Back to chat',
+          icon: Icon(Icons.arrow_back_rounded, color: c.text1),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
         title: Row(
           children: [
-            Icon(Icons.headphones_rounded, color: context.accent),
+            Icon(Icons.podcasts_rounded, color: context.accent),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -125,11 +145,28 @@ class _ZonePageState extends State<ZonePage> {
           ],
         ),
       ),
-      body: ListenableBuilder(
+      body: Stack(children: [
+        Positioned.fill(child: _body()),
+        // Glowing animated reactions float over the whole zone.
+        Positioned.fill(
+          child: ListenableBuilder(
+            listenable: z,
+            builder: (_, __) => ZoneFloatingReactions(
+              reactions: List.of(z.reactions),
+              nameOf: _name,
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _body() {
+    final c = context.tr;
+    return ListenableBuilder(
         listenable: z,
         builder: (context, _) {
-          final wide =
-              !Responsive.isMobile(context) &&
+          final wide = !Responsive.isMobile(context) &&
               MediaQuery.sizeOf(context).width > 1000;
           final left = ListView(
             padding: const EdgeInsets.all(16),
@@ -161,8 +198,7 @@ class _ZonePageState extends State<ZonePage> {
             ],
           );
         },
-      ),
-    );
+      );
   }
 
   Widget _card(
@@ -170,30 +206,31 @@ class _ZonePageState extends State<ZonePage> {
     String title,
     List<Widget> children, {
     Widget? trailing,
-  }) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      border: Border(bottom: BorderSide(color: c.border)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
+  }) =>
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: c.border)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: Text(
-                title,
-                style: TRText.body(15, c.text1, w: FontWeight.w600),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TRText.body(15, c.text1, w: FontWeight.w600),
+                  ),
+                ),
+                if (trailing != null) trailing,
+              ],
             ),
-            if (trailing != null) trailing,
+            const SizedBox(height: 12),
+            ...children,
           ],
         ),
-        const SizedBox(height: 12),
-        ...children,
-      ],
-    ),
-  );
+      );
 
   Widget _voiceCard(TRColors c) {
     return _card(c, 'Voice · ${z.participants.length} here', [
@@ -245,13 +282,6 @@ class _ZonePageState extends State<ZonePage> {
             ),
         ],
       ),
-      if (z.reactions.isNotEmpty) ...[
-        const SizedBox(height: 8),
-        Text(
-          z.reactions.map((r) => r.emoji).join(' '),
-          style: const TextStyle(fontSize: 28),
-        ),
-      ],
       const SizedBox(height: 14),
       Wrap(
         spacing: 8,
@@ -273,10 +303,9 @@ class _ZonePageState extends State<ZonePage> {
             ),
             TRButton(
               label: z.deafened ? 'Undeafen' : 'Deafen',
-              icon:
-                  z.deafened
-                      ? Icons.headset_off_rounded
-                      : Icons.headset_rounded,
+              icon: z.deafened
+                  ? Icons.headset_off_rounded
+                  : Icons.headset_rounded,
               variant: TRButtonVariant.outline,
               onPressed: z.toggleDeafen,
             ),
@@ -287,15 +316,8 @@ class _ZonePageState extends State<ZonePage> {
                 variant: TRButtonVariant.outline,
                 onPressed: _share,
               ),
-            for (final e in const ['👍', '😂', '🔥', '❤️', '🎉'])
-              InkWell(
-                onTap: () => z.react(e),
-                borderRadius: BorderRadius.circular(20),
-                child: Padding(
-                  padding: const EdgeInsets.all(6),
-                  child: Text(e, style: const TextStyle(fontSize: 22)),
-                ),
-              ),
+            for (final e in kZoneReactionEmojis)
+              ZoneReactionButton(e, onTap: () => z.react(e)),
             TRButton(
               label: 'Leave',
               icon: Icons.logout_rounded,
@@ -309,33 +331,33 @@ class _ZonePageState extends State<ZonePage> {
   }
 
   Widget _screensCard(TRColors c) => _card(c, 'Screens', [
-    if (z.sharing)
-      AspectRatio(
-        aspectRatio: 16 / 9,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(TRRadius.x2l),
-          child: RTCVideoView(
-            z.localScreen,
-            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+        if (z.sharing)
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(TRRadius.x2l),
+              child: RTCVideoView(
+                z.localScreen,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+              ),
+            ),
           ),
-        ),
-      ),
-    for (final e in z.screens.entries) ...[
-      const SizedBox(height: 8),
-      Text('${_name(e.key)} is sharing', style: TRText.body(12, c.text2)),
-      const SizedBox(height: 4),
-      AspectRatio(
-        aspectRatio: 16 / 9,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(TRRadius.x2l),
-          child: RTCVideoView(
-            e.value,
-            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+        for (final e in z.screens.entries) ...[
+          const SizedBox(height: 8),
+          Text('${_name(e.key)} is sharing', style: TRText.body(12, c.text2)),
+          const SizedBox(height: 4),
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(TRRadius.x2l),
+              child: RTCVideoView(
+                e.value,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+              ),
+            ),
           ),
-        ),
-      ),
-    ],
-  ]);
+        ],
+      ]);
 
   Widget _musicCard(TRColors c) {
     final zone = z.zone;
@@ -357,17 +379,16 @@ class _ZonePageState extends State<ZonePage> {
         else
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading:
-                zone?['current_video_thumb'] != null
-                    ? ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        zone!['current_video_thumb'],
-                        width: 64,
-                        fit: BoxFit.cover,
-                      ),
-                    )
-                    : const Icon(Icons.music_note_rounded),
+            leading: zone?['current_video_thumb'] != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      zone!['current_video_thumb'],
+                      width: 64,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                : const Icon(Icons.music_note_rounded),
             title: Text(
               zone?['current_video_title'] ?? 'Playing',
               style: TRText.body(14, c.text1),
@@ -380,13 +401,12 @@ class _ZonePageState extends State<ZonePage> {
             ),
             trailing: IconButton(
               icon: const Icon(Icons.open_in_new_rounded),
-              onPressed:
-                  () => launchUrl(
-                    Uri.parse(
-                      'https://www.youtube.com/watch?v=$vid&t=${z.musicPosition.floor()}s',
-                    ),
-                    mode: LaunchMode.externalApplication,
-                  ),
+              onPressed: () => launchUrl(
+                Uri.parse(
+                  'https://www.youtube.com/watch?v=$vid&t=${z.musicPosition.floor()}s',
+                ),
+                mode: LaunchMode.externalApplication,
+              ),
             ),
           ),
         const SizedBox(height: 8),
@@ -447,17 +467,16 @@ class _ZonePageState extends State<ZonePage> {
           ListTile(
             dense: true,
             contentPadding: EdgeInsets.zero,
-            leading:
-                q.thumbnail != null
-                    ? ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: Image.network(
-                        q.thumbnail!,
-                        width: 48,
-                        fit: BoxFit.cover,
-                      ),
-                    )
-                    : null,
+            leading: q.thumbnail != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.network(
+                      q.thumbnail!,
+                      width: 48,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                : null,
             title: Text(
               q.title,
               maxLines: 1,
@@ -468,94 +487,93 @@ class _ZonePageState extends State<ZonePage> {
               'Added by ${_name(q.addedBy)}',
               style: TRText.body(11, c.text3),
             ),
-            trailing:
-                z.joined
-                    ? IconButton(
-                      icon: const Icon(Icons.close_rounded, size: 18),
-                      onPressed: () => z.removeTrack(q.id),
-                    )
-                    : null,
+            trailing: z.joined
+                ? IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    onPressed: () => z.removeTrack(q.id),
+                  )
+                : null,
           ),
       ],
     ]);
   }
 
   Widget _chatCard(TRColors c) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      border: Border(bottom: BorderSide(color: c.border)),
-    ),
-    child: Column(
-      children: [
-        Row(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: c.border)),
+        ),
+        child: Column(
           children: [
-            Text(
-              'Zone chat',
-              style: TRText.body(15, c.text1, w: FontWeight.w600),
+            Row(
+              children: [
+                Text(
+                  'Zone chat',
+                  style: TRText.body(15, c.text1, w: FontWeight.w600),
+                ),
+              ],
             ),
-          ],
-        ),
-        Text(
-          'Only people in the Zone see this. It is not saved.',
-          style: TRText.body(11, c.text3),
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: ListView(
-            reverse: true,
-            children: [
-              for (final m in z.messages.reversed)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: RichText(
-                    text: TextSpan(
-                      style: TRText.body(13, c.text1),
-                      children: [
-                        TextSpan(
-                          text: '${_name(m.from)}  ',
-                          style: TRText.body(
-                            13,
-                            context.accent,
-                            w: FontWeight.w700,
-                          ),
+            Text(
+              'Only people in the Zone see this. It is not saved.',
+              style: TRText.body(11, c.text3),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView(
+                reverse: true,
+                children: [
+                  for (final m in z.messages.reversed)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: RichText(
+                        text: TextSpan(
+                          style: TRText.body(13, c.text1),
+                          children: [
+                            TextSpan(
+                              text: '${_name(m.from)}  ',
+                              style: TRText.body(
+                                13,
+                                context.accent,
+                                w: FontWeight.w700,
+                              ),
+                            ),
+                            TextSpan(text: m.text),
+                          ],
                         ),
-                        TextSpan(text: m.text),
-                      ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (z.joined)
+              Row(
+                children: [
+                  Expanded(
+                    child: TRTextField(
+                      controller: _chat,
+                      hint: 'Say something…',
+                      maxLength: 500,
+                      onSubmitted: (v) {
+                        z.sendChat(v);
+                        _chat.clear();
+                      },
                     ),
                   ),
-                ),
-            ],
-          ),
+                  TRIconButton(
+                    icon: Icons.send_rounded,
+                    tooltip: 'Send',
+                    onPressed: () {
+                      z.sendChat(_chat.text);
+                      _chat.clear();
+                    },
+                  ),
+                ],
+              )
+            else
+              Text('Join to chat.', style: TRText.body(12, c.text3)),
+          ],
         ),
-        if (z.joined)
-          Row(
-            children: [
-              Expanded(
-                child: TRTextField(
-                  controller: _chat,
-                  hint: 'Say something…',
-                  maxLength: 500,
-                  onSubmitted: (v) {
-                    z.sendChat(v);
-                    _chat.clear();
-                  },
-                ),
-              ),
-              TRIconButton(
-                icon: Icons.send_rounded,
-                tooltip: 'Send',
-                onPressed: () {
-                  z.sendChat(_chat.text);
-                  _chat.clear();
-                },
-              ),
-            ],
-          )
-        else
-          Text('Join to chat.', style: TRText.body(12, c.text3)),
-      ],
-    ),
-  );
+      );
 }
 
 /// Embedded YouTube that keeps itself in step with the Zone's shared timeline.
@@ -612,7 +630,7 @@ class _SyncedPlayerState extends State<_SyncedPlayer> {
 
   @override
   Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(TRRadius.x2l),
-    child: YoutubePlayer(controller: _yt, aspectRatio: 16 / 9),
-  );
+        borderRadius: BorderRadius.circular(TRRadius.x2l),
+        child: YoutubePlayer(controller: _yt, aspectRatio: 16 / 9),
+      );
 }

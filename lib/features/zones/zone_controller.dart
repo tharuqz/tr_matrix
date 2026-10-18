@@ -58,14 +58,18 @@ class _Peer {
 
 String _id() {
   final r = Random.secure();
-  return List.generate(12, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+  return List.generate(
+    12,
+    (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ).join();
 }
 
 Map<String, dynamic> _payloadOf(dynamic msg) {
   final m = (msg is Map) ? Map<String, dynamic>.from(msg) : <String, dynamic>{};
   if (m['payload'] is Map) {
     final p = Map<String, dynamic>.from(m['payload']);
-    if (p['payload'] is Map && p.containsKey('event')) return Map<String, dynamic>.from(p['payload']);
+    if (p['payload'] is Map && p.containsKey('event'))
+      return Map<String, dynamic>.from(p['payload']);
     return p;
   }
   return m;
@@ -75,7 +79,11 @@ const _ice = [
   {'urls': 'stun:stun.l.google.com:19302'},
   {'urls': 'stun:stun.cloudflare.com:3478'},
   {
-    'urls': ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'],
+    'urls': [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp',
+    ],
     'username': 'openrelayproject',
     'credential': 'openrelayproject',
   },
@@ -91,10 +99,13 @@ String? parseYouTubeId(String input) {
     final id = u.pathSegments.isNotEmpty ? u.pathSegments.first : '';
     return idRe.hasMatch(id) ? id : null;
   }
-  if (u.host.endsWith('youtube.com') || u.host.endsWith('youtube-nocookie.com')) {
+  if (u.host.endsWith('youtube.com') ||
+      u.host.endsWith('youtube-nocookie.com')) {
     final v = u.queryParameters['v'];
     if (v != null && idRe.hasMatch(v)) return v;
-    final m = RegExp(r'/(?:shorts|embed)/([a-zA-Z0-9_-]{11})').firstMatch(u.path);
+    final m = RegExp(
+      r'/(?:shorts|embed)/([a-zA-Z0-9_-]{11})',
+    ).firstMatch(u.path);
     if (m != null) return m.group(1);
   }
   return null;
@@ -115,7 +126,11 @@ class ZoneController extends ChangeNotifier {
   final List<ZoneChatMsg> messages = [];
   final List<ZoneReaction> reactions = [];
   final Map<String, _Peer> _peers = {};
-  bool joined = false, joining = false, muted = false, deafened = false, sharing = false;
+  bool joined = false,
+      joining = false,
+      muted = false,
+      deafened = false,
+      sharing = false;
   String? error;
 
   MediaStream? _mic, _screenStream;
@@ -123,13 +138,16 @@ class ZoneController extends ChangeNotifier {
   bool _localScreenReady = false;
   RealtimeChannel? _rtc, _dbCh;
 
-  Map<String, RTCVideoRenderer> get screens =>
-      {for (final e in _peers.entries) if (e.value.screen != null) e.key: e.value.screen!};
+  Map<String, RTCVideoRenderer> get screens => {
+        for (final e in _peers.entries)
+          if (e.value.screen != null) e.key: e.value.screen!,
+      };
 
   // ---------------------------------------------------------------- data
   Future<void> _loadPassive() async {
     try {
-      final z = await db.from('zones').select().eq('chat_id', chatId).maybeSingle();
+      final z =
+          await db.from('zones').select().eq('chat_id', chatId).maybeSingle();
       if (z == null) return;
       zoneId = z['id'];
       zone = z;
@@ -146,7 +164,12 @@ class ZoneController extends ChangeNotifier {
     if (id == null) return;
     final res = await Future.wait([
       db.from('zone_participants').select().eq('zone_id', id),
-      db.from('zone_queue').select().eq('zone_id', id).order('position').order('created_at'),
+      db
+          .from('zone_queue')
+          .select()
+          .eq('zone_id', id)
+          .order('position')
+          .order('created_at'),
     ]);
     participants = [for (final r in res[0]) ZoneParticipant.fromJson(r)];
     queue = [for (final r in res[1]) ZoneQueueItem.fromJson(r)];
@@ -158,26 +181,41 @@ class ZoneController extends ChangeNotifier {
     _dbCh = db
         .channel('zone-db:$id:${_id()}')
         .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'zone_participants',
-            filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'zone_id', value: id),
-            callback: (_) => _refreshLists().then((_) => notifyListeners()))
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'zone_participants',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'zone_id',
+            value: id,
+          ),
+          callback: (_) => _refreshLists().then((_) => notifyListeners()),
+        )
         .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'zone_queue',
-            filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'zone_id', value: id),
-            callback: (_) => _refreshLists().then((_) => notifyListeners()))
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'zone_queue',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'zone_id',
+            value: id,
+          ),
+          callback: (_) => _refreshLists().then((_) => notifyListeners()),
+        )
         .onPostgresChanges(
-            event: PostgresChangeEvent.update,
-            schema: 'public',
-            table: 'zones',
-            filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'id', value: id),
-            callback: (p) {
-              zone = p.newRecord;
-              notifyListeners();
-            })
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'zones',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: id,
+          ),
+          callback: (p) {
+            zone = p.newRecord;
+            notifyListeners();
+          },
+        )
         .subscribe();
   }
 
@@ -188,7 +226,8 @@ class ZoneController extends ChangeNotifier {
     final base = (z['current_position_sec'] as num?)?.toDouble() ?? 0;
     final started = DateTime.tryParse(z['current_started_at'] ?? '');
     if (z['is_playing'] == true && started != null) {
-      return base + max(0, DateTime.now().difference(started).inMilliseconds / 1000);
+      return base +
+          max(0, DateTime.now().difference(started).inMilliseconds / 1000);
     }
     return base;
   }
@@ -201,62 +240,108 @@ class ZoneController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      final zid = await db.rpc('ensure_zone', params: {'_chat_id': chatId}) as String;
+      final zid =
+          await db.rpc('ensure_zone', params: {'_chat_id': chatId}) as String;
       zoneId = zid;
       _mic = await navigator.mediaDevices.getUserMedia({
-        'audio': {'echoCancellation': true, 'noiseSuppression': true, 'autoGainControl': true},
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
         'video': false,
       });
       _applyMic();
-      await db.from('zone_participants').upsert({'zone_id': zid, 'user_id': uid, 'joined_at': DateTime.now().toUtc().toIso8601String()});
+      await db.from('zone_participants').upsert({
+        'zone_id': zid,
+        'user_id': uid,
+        'joined_at': DateTime.now().toUtc().toIso8601String(),
+      });
       zone = await db.from('zones').select().eq('id', zid).maybeSingle();
       await _refreshLists();
       _watchDb();
 
-      final ch = db.channel('zone-rtc:$zid', opts: const RealtimeChannelConfig(self: false));
+      final ch = db.channel(
+        'zone-rtc:$zid',
+        opts: const RealtimeChannelConfig(self: false),
+      );
       _rtc = ch;
-      ch.onBroadcast(event: 'hello', callback: (m) {
-        final p = _payloadOf(m);
-        final from = p['from'];
-        if (from is String && from != uid && !_peers.containsKey(from)) _createPeer(from, true);
-      });
+      ch.onBroadcast(
+        event: 'hello',
+        callback: (m) {
+          final p = _payloadOf(m);
+          final from = p['from'];
+          if (from is String && from != uid && !_peers.containsKey(from))
+            _createPeer(from, true);
+        },
+      );
       ch.onBroadcast(event: 'offer', callback: (m) => _onOffer(_payloadOf(m)));
-      ch.onBroadcast(event: 'answer', callback: (m) => _onAnswer(_payloadOf(m)));
+      ch.onBroadcast(
+        event: 'answer',
+        callback: (m) => _onAnswer(_payloadOf(m)),
+      );
       ch.onBroadcast(event: 'ice', callback: (m) => _onIce(_payloadOf(m)));
-      ch.onBroadcast(event: 'bye', callback: (m) {
-        final from = _payloadOf(m)['from'];
-        if (from is String) _closePeer(from);
-        notifyListeners();
-      });
-      ch.onBroadcast(event: 'screen', callback: (m) {
-        final p = _payloadOf(m);
-        if (p['on'] == false && p['from'] is String) {
-          final peer = _peers[p['from']];
-          peer?.screen?.srcObject = null;
-          peer?.screen?.dispose();
-          peer?.screen = null;
+      ch.onBroadcast(
+        event: 'bye',
+        callback: (m) {
+          final from = _payloadOf(m)['from'];
+          if (from is String) _closePeer(from);
           notifyListeners();
-        }
-      });
-      ch.onBroadcast(event: 'music-sync', callback: (m) async {
-        zone = await db.from('zones').select().eq('id', zid).maybeSingle();
-        notifyListeners();
-      });
-      ch.onBroadcast(event: 'chat', callback: (m) {
-        final p = _payloadOf(m);
-        if (p['id'] is! String || p['text'] is! String) return;
-        if (messages.any((x) => x.id == p['id'])) return;
-        messages.add(ZoneChatMsg(p['id'], p['from'] ?? '', p['text'], (p['at'] as num?)?.toInt() ?? 0));
-        if (messages.length > 200) messages.removeAt(0);
-        notifyListeners();
-      });
-      ch.onBroadcast(event: 'react', callback: (m) => _showReaction(_payloadOf(m)));
+        },
+      );
+      ch.onBroadcast(
+        event: 'screen',
+        callback: (m) {
+          final p = _payloadOf(m);
+          if (p['on'] == false && p['from'] is String) {
+            final peer = _peers[p['from']];
+            peer?.screen?.srcObject = null;
+            peer?.screen?.dispose();
+            peer?.screen = null;
+            notifyListeners();
+          }
+        },
+      );
+      ch.onBroadcast(
+        event: 'music-sync',
+        callback: (m) async {
+          zone = await db.from('zones').select().eq('id', zid).maybeSingle();
+          notifyListeners();
+        },
+      );
+      ch.onBroadcast(
+        event: 'chat',
+        callback: (m) {
+          final p = _payloadOf(m);
+          if (p['id'] is! String || p['text'] is! String) return;
+          if (messages.any((x) => x.id == p['id'])) return;
+          messages.add(
+            ZoneChatMsg(
+              p['id'],
+              p['from'] ?? '',
+              p['text'],
+              (p['at'] as num?)?.toInt() ?? 0,
+            ),
+          );
+          if (messages.length > 200) messages.removeAt(0);
+          notifyListeners();
+        },
+      );
+      ch.onBroadcast(
+        event: 'react',
+        callback: (m) => _showReaction(_payloadOf(m)),
+      );
 
       final ready = Completer<void>();
       ch.subscribe((s, _) {
-        if (s == RealtimeSubscribeStatus.subscribed && !ready.isCompleted) ready.complete();
-        if ((s == RealtimeSubscribeStatus.channelError || s == RealtimeSubscribeStatus.timedOut) && !ready.isCompleted) {
-          ready.completeError(Exception('Could not connect to the Zone. Please try again.'));
+        if (s == RealtimeSubscribeStatus.subscribed && !ready.isCompleted)
+          ready.complete();
+        if ((s == RealtimeSubscribeStatus.channelError ||
+                s == RealtimeSubscribeStatus.timedOut) &&
+            !ready.isCompleted) {
+          ready.completeError(
+            Exception('Could not connect to the Zone. Please try again.'),
+          );
         }
       });
       await ready.future.timeout(const Duration(seconds: 15));
@@ -294,7 +379,11 @@ class ZoneController extends ChangeNotifier {
     final zid = zoneId, uid = me;
     if (zid != null && uid != null) {
       try {
-        await db.from('zone_participants').delete().eq('zone_id', zid).eq('user_id', uid);
+        await db
+            .from('zone_participants')
+            .delete()
+            .eq('zone_id', zid)
+            .eq('user_id', uid);
       } catch (_) {}
     }
     joined = false;
@@ -307,7 +396,10 @@ class ZoneController extends ChangeNotifier {
     if (uid == null || _rtc == null) return null;
     final existing = _peers[peerId];
     if (existing != null) return existing;
-    final pc = await createPeerConnection({'iceServers': _ice, 'sdpSemantics': 'unified-plan'});
+    final pc = await createPeerConnection({
+      'iceServers': _ice,
+      'sdpSemantics': 'unified-plan',
+    });
     final peer = _Peer(pc);
     _peers[peerId] = peer;
     await peer.audio.initialize();
@@ -333,18 +425,28 @@ class ZoneController extends ChangeNotifier {
     };
     pc.onIceCandidate = (c) {
       if (c.candidate == null) return;
-      _rtc?.sendBroadcastMessage(event: 'ice', payload: {
-        'from': uid,
-        'to': peerId,
-        'candidate': {'candidate': c.candidate, 'sdpMid': c.sdpMid, 'sdpMLineIndex': c.sdpMLineIndex},
-      });
+      _rtc?.sendBroadcastMessage(
+        event: 'ice',
+        payload: {
+          'from': uid,
+          'to': peerId,
+          'candidate': {
+            'candidate': c.candidate,
+            'sdpMid': c.sdpMid,
+            'sdpMLineIndex': c.sdpMLineIndex,
+          },
+        },
+      );
     };
     pc.onConnectionState = (s) {
-      if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed) pc.restartIce();
+      if (s == RTCPeerConnectionState.RTCPeerConnectionStateFailed)
+        pc.restartIce();
     };
     // Renegotiate when tracks change (e.g. screen share added later).
     pc.onRenegotiationNeeded = () {
-      if (initiator || pc.signalingState == RTCSignalingState.RTCSignalingStateStable) _negotiate(peerId, pc);
+      if (initiator ||
+          pc.signalingState == RTCSignalingState.RTCSignalingStateStable)
+        _negotiate(peerId, pc);
     };
     if (initiator) await _negotiate(peerId, pc);
     return peer;
@@ -353,7 +455,14 @@ class ZoneController extends ChangeNotifier {
   Future<void> _negotiate(String peerId, RTCPeerConnection pc) async {
     final offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    await _rtc?.sendBroadcastMessage(event: 'offer', payload: {'from': me, 'to': peerId, 'sdp': {'type': offer.type, 'sdp': offer.sdp}});
+    await _rtc?.sendBroadcastMessage(
+      event: 'offer',
+      payload: {
+        'from': me,
+        'to': peerId,
+        'sdp': {'type': offer.type, 'sdp': offer.sdp},
+      },
+    );
   }
 
   Future<void> _drain(String from, RTCPeerConnection pc) async {
@@ -375,16 +484,26 @@ class ZoneController extends ChangeNotifier {
     final pc = peer.pc;
     try {
       // Both offered at once: the higher id keeps its offer (website rule).
-      if (pc.signalingState == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+      if (pc.signalingState ==
+          RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
         if (uid!.compareTo(from) > 0) return;
         await pc.setLocalDescription(RTCSessionDescription(null, 'rollback'));
       }
       final sdp = Map<String, dynamic>.from(p['sdp']);
-      await pc.setRemoteDescription(RTCSessionDescription(sdp['sdp'], sdp['type']));
+      await pc.setRemoteDescription(
+        RTCSessionDescription(sdp['sdp'], sdp['type']),
+      );
       await _drain(from, pc);
       final ans = await pc.createAnswer();
       await pc.setLocalDescription(ans);
-      await _rtc?.sendBroadcastMessage(event: 'answer', payload: {'from': uid, 'to': from, 'sdp': {'type': ans.type, 'sdp': ans.sdp}});
+      await _rtc?.sendBroadcastMessage(
+        event: 'answer',
+        payload: {
+          'from': uid,
+          'to': from,
+          'sdp': {'type': ans.type, 'sdp': ans.sdp},
+        },
+      );
     } catch (e) {
       debugPrint('[zone] offer failed $e');
     }
@@ -394,9 +513,13 @@ class ZoneController extends ChangeNotifier {
     final from = p['from'];
     if (from is! String || p['to'] != me) return;
     final pc = _peers[from]?.pc;
-    if (pc == null || pc.signalingState != RTCSignalingState.RTCSignalingStateHaveLocalOffer) return;
+    if (pc == null ||
+        pc.signalingState != RTCSignalingState.RTCSignalingStateHaveLocalOffer)
+      return;
     final sdp = Map<String, dynamic>.from(p['sdp']);
-    await pc.setRemoteDescription(RTCSessionDescription(sdp['sdp'], sdp['type']));
+    await pc.setRemoteDescription(
+      RTCSessionDescription(sdp['sdp'], sdp['type']),
+    );
     await _drain(from, pc);
   }
 
@@ -404,7 +527,11 @@ class ZoneController extends ChangeNotifier {
     final from = p['from'];
     if (from is! String || p['to'] != me) return;
     final c = Map<String, dynamic>.from(p['candidate'] ?? {});
-    final ice = RTCIceCandidate(c['candidate'], c['sdpMid'], (c['sdpMLineIndex'] as num?)?.toInt());
+    final ice = RTCIceCandidate(
+      c['candidate'],
+      c['sdpMid'],
+      (c['sdpMLineIndex'] as num?)?.toInt(),
+    );
     final peer = _peers[from];
     if (peer == null) return;
     final remote = await peer.pc.getRemoteDescription();
@@ -437,7 +564,11 @@ class ZoneController extends ChangeNotifier {
     muted = !muted;
     _applyMic();
     notifyListeners();
-    await db.from('zone_participants').update({'is_muted': muted}).eq('zone_id', zoneId!).eq('user_id', me!);
+    await db
+        .from('zone_participants')
+        .update({'is_muted': muted})
+        .eq('zone_id', zoneId!)
+        .eq('user_id', me!);
   }
 
   Future<void> toggleDeafen() async {
@@ -445,20 +576,33 @@ class ZoneController extends ChangeNotifier {
     if (deafened) muted = true;
     _applyMic();
     for (final p in _peers.values) {
-      for (final t in p.audio.srcObject?.getAudioTracks() ?? <MediaStreamTrack>[]) {
+      for (final t
+          in p.audio.srcObject?.getAudioTracks() ?? <MediaStreamTrack>[]) {
         t.enabled = !deafened;
       }
     }
     notifyListeners();
-    await db.from('zone_participants').update({'is_deafened': deafened, 'is_muted': muted}).eq('zone_id', zoneId!).eq('user_id', me!);
+    await db
+        .from('zone_participants')
+        .update({'is_deafened': deafened, 'is_muted': muted})
+        .eq('zone_id', zoneId!)
+        .eq('user_id', me!);
   }
 
   Future<void> startScreenShare({String? desktopSourceId}) async {
     if (!joined || sharing) return;
     try {
-      _screenStream = await navigator.mediaDevices.getDisplayMedia(desktopSourceId != null
-          ? {'video': {'deviceId': {'exact': desktopSourceId}, 'mandatory': {'frameRate': 30.0}}, 'audio': false}
-          : {'video': true, 'audio': false});
+      _screenStream = await navigator.mediaDevices.getDisplayMedia(
+        desktopSourceId != null
+            ? {
+                'video': {
+                  'deviceId': {'exact': desktopSourceId},
+                  'mandatory': {'frameRate': 30.0},
+                },
+                'audio': false,
+              }
+            : {'video': true, 'audio': false},
+      );
       if (!_localScreenReady) {
         await localScreen.initialize();
         _localScreenReady = true;
@@ -470,7 +614,10 @@ class ZoneController extends ChangeNotifier {
         await p.pc.addTrack(track, _screenStream!); // triggers renegotiation
       }
       sharing = true;
-      await _rtc?.sendBroadcastMessage(event: 'screen', payload: {'from': me, 'on': true});
+      await _rtc?.sendBroadcastMessage(
+        event: 'screen',
+        payload: {'from': me, 'on': true},
+      );
       notifyListeners();
     } catch (_) {
       error = 'Screen sharing was cancelled or is not allowed.';
@@ -491,15 +638,26 @@ class ZoneController extends ChangeNotifier {
     _screenStream = null;
     if (_localScreenReady) localScreen.srcObject = null;
     sharing = false;
-    if (announce) await _rtc?.sendBroadcastMessage(event: 'screen', payload: {'from': me, 'on': false});
+    if (announce)
+      await _rtc?.sendBroadcastMessage(
+        event: 'screen',
+        payload: {'from': me, 'on': false},
+      );
     notifyListeners();
   }
 
   Future<void> sendChat(String text) async {
     final t = text.trim();
     if (t.isEmpty || !joined) return;
-    final m = {'id': _id(), 'from': me, 'text': t.length > 500 ? t.substring(0, 500) : t, 'at': DateTime.now().millisecondsSinceEpoch};
-    messages.add(ZoneChatMsg(m['id'] as String, me!, m['text'] as String, m['at'] as int));
+    final m = {
+      'id': _id(),
+      'from': me,
+      'text': t.length > 500 ? t.substring(0, 500) : t,
+      'at': DateTime.now().millisecondsSinceEpoch,
+    };
+    messages.add(
+      ZoneChatMsg(m['id'] as String, me!, m['text'] as String, m['at'] as int),
+    );
     notifyListeners();
     await _rtc?.sendBroadcastMessage(event: 'chat', payload: m);
   }
@@ -517,7 +675,12 @@ class ZoneController extends ChangeNotifier {
   }
 
   Future<void> react(String emoji) async {
-    final r = {'id': _id(), 'from': me, 'emoji': emoji, 'at': DateTime.now().millisecondsSinceEpoch};
+    final r = {
+      'id': _id(),
+      'from': me,
+      'emoji': emoji,
+      'at': DateTime.now().millisecondsSinceEpoch,
+    };
     _showReaction(r);
     await _rtc?.sendBroadcastMessage(event: 'react', payload: r);
   }
@@ -527,10 +690,16 @@ class ZoneController extends ChangeNotifier {
     final id = zoneId;
     if (id == null) return false;
     try {
-      await db.from('zones').update({...patch, 'updated_at': DateTime.now().toUtc().toIso8601String()}).eq('id', id);
+      await db.from('zones').update({
+        ...patch,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', id);
       zone = {...?zone, ...patch};
       notifyListeners();
-      await _rtc?.sendBroadcastMessage(event: 'music-sync', payload: {'from': me ?? '', 'zone': zone});
+      await _rtc?.sendBroadcastMessage(
+        event: 'music-sync',
+        payload: {'from': me ?? '', 'zone': zone},
+      );
       return true;
     } catch (e) {
       error = '$e';
@@ -546,7 +715,11 @@ class ZoneController extends ChangeNotifier {
     var title = 'YouTube video';
     var thumb = 'https://i.ytimg.com/vi/$vid/hqdefault.jpg';
     try {
-      final r = await http.get(Uri.parse('https://noembed.com/embed?url=${Uri.encodeComponent('https://www.youtube.com/watch?v=$vid')}'));
+      final r = await http.get(
+        Uri.parse(
+          'https://noembed.com/embed?url=${Uri.encodeComponent('https://www.youtube.com/watch?v=$vid')}',
+        ),
+      );
       if (r.statusCode == 200) {
         final j = jsonDecode(r.body) as Map<String, dynamic>;
         title = (j['title'] as String?) ?? title;
@@ -566,7 +739,14 @@ class ZoneController extends ChangeNotifier {
     }
     final maxPos = queue.fold<int>(0, (m, q) => max(m, q.position));
     try {
-      await db.from('zone_queue').insert({'zone_id': zoneId, 'video_id': vid, 'title': title, 'thumbnail': thumb, 'added_by': me, 'position': maxPos + 1});
+      await db.from('zone_queue').insert({
+        'zone_id': zoneId,
+        'video_id': vid,
+        'title': title,
+        'thumbnail': thumb,
+        'added_by': me,
+        'position': maxPos + 1,
+      });
     } catch (e) {
       return '$e';
     }
@@ -583,7 +763,11 @@ class ZoneController extends ChangeNotifier {
     if (queue.isNotEmpty) {
       final next = queue.first;
       queue.remove(next);
-      await db.from('zone_queue').delete().eq('zone_id', zoneId!).eq('id', next.id);
+      await db
+          .from('zone_queue')
+          .delete()
+          .eq('zone_id', zoneId!)
+          .eq('id', next.id);
       await _publish({
         'current_video_id': next.videoId,
         'current_video_title': next.title,
@@ -610,7 +794,9 @@ class ZoneController extends ChangeNotifier {
     await _publish({
       'is_playing': !playing,
       'current_position_sec': musicPosition,
-      'current_started_at': !playing ? DateTime.now().toUtc().toIso8601String() : zone!['current_started_at'],
+      'current_started_at': !playing
+          ? DateTime.now().toUtc().toIso8601String()
+          : zone!['current_started_at'],
     });
   }
 

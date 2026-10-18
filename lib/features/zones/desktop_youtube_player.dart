@@ -12,7 +12,11 @@ import 'zone_controller.dart';
 class DesktopSyncedPlayer extends StatefulWidget {
   final ZoneController z;
   final String videoId;
-  const DesktopSyncedPlayer({super.key, required this.z, required this.videoId});
+  const DesktopSyncedPlayer({
+    super.key,
+    required this.z,
+    required this.videoId,
+  });
   @override
   State<DesktopSyncedPlayer> createState() => _DesktopSyncedPlayerState();
 }
@@ -32,8 +36,10 @@ class _DesktopSyncedPlayerState extends State<DesktopSyncedPlayer> {
   }
 
   Future<Uri> _resolve() async {
-    final m = await _yt.videos.streamsClient.getManifest(widget.videoId,
-        ytClients: [YoutubeApiClient.androidVr, YoutubeApiClient.ios]);
+    final m = await _yt.videos.streamsClient.getManifest(
+      widget.videoId,
+      ytClients: [YoutubeApiClient.androidVr, YoutubeApiClient.ios],
+    );
     // Muxed = video+audio in one file (up to 360p/720p) — simplest and most reliable.
     if (m.muxed.isNotEmpty) return m.muxed.withHighestBitrate().url;
     // Fallback: audio only (still fine for "music" mode).
@@ -50,14 +56,17 @@ class _DesktopSyncedPlayerState extends State<DesktopSyncedPlayer> {
         url = Uri.parse('https://www.youtube.com/watch?v=${widget.videoId}');
       }
       await _player.open(Media(url.toString()), play: false);
-      await _player.stream.duration.firstWhere((d) => d > Duration.zero).timeout(const Duration(seconds: 20));
+      await _player.stream.duration
+          .firstWhere((d) => d > Duration.zero)
+          .timeout(const Duration(seconds: 20));
       if (!mounted) return;
       setState(() => _ready = true);
       await _check();
       _sync = Timer.periodic(const Duration(seconds: 4), (_) => _check());
       widget.z.addListener(_check);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Could not play this video in the app.');
+      if (mounted)
+        setState(() => _error = 'Could not play this video in the app.');
     }
   }
 
@@ -94,11 +103,25 @@ class _DesktopSyncedPlayerState extends State<DesktopSyncedPlayer> {
       child: AspectRatio(
         aspectRatio: 16 / 9,
         child: _error != null
-            ? Container(color: Colors.black, alignment: Alignment.center, child: Text(_error!, style: const TextStyle(color: Colors.white70)))
-            : Stack(fit: StackFit.expand, children: [
-                Video(controller: _video, controls: NoVideoControls, fill: Colors.black),
-                if (!_ready) const Center(child: CircularProgressIndicator()),
-              ]),
+            ? Container(
+                color: Colors.black,
+                alignment: Alignment.center,
+                child: Text(
+                  _error!,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              )
+            : Stack(
+                fit: StackFit.expand,
+                children: [
+                  Video(
+                    controller: _video,
+                    controls: NoVideoControls,
+                    fill: Colors.black,
+                  ),
+                  if (!_ready) const Center(child: CircularProgressIndicator()),
+                ],
+              ),
       ),
     );
   }

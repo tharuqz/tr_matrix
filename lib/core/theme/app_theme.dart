@@ -15,10 +15,10 @@ class ThemeController extends ChangeNotifier {
   bool hidePreviews = false;
 
   double get textScale => switch (fontSize) {
-    'small' => .9,
-    'large' => 1.15,
-    _ => 1.0,
-  };
+        'small' => .9,
+        'large' => 1.15,
+        _ => 1.0,
+      };
 
   Future<void> load() async {
     final p = await SharedPreferences.getInstance();
@@ -54,9 +54,9 @@ class ThemeController extends ChangeNotifier {
   }
 
   void setMode(TRThemeMode m) => _set(() {
-    mode = m;
-    followSystem = false;
-  });
+        mode = m;
+        followSystem = false;
+      });
   void setFollowSystem(bool v) => _set(() => followSystem = v);
   void setAccent(Color c) => _set(() => accent = c);
   void setFontSize(String v) => _set(() => fontSize = v);
@@ -73,10 +73,10 @@ class ThemeController extends ChangeNotifier {
   }
 
   TRColors get colors => switch (effectiveMode) {
-    TRThemeMode.dark => TRColors.dark,
-    TRThemeMode.amoled => TRColors.amoled,
-    TRThemeMode.light => TRColors.light,
-  };
+        TRThemeMode.dark => TRColors.dark,
+        TRThemeMode.amoled => TRColors.amoled,
+        TRThemeMode.light => TRColors.light,
+      };
 }
 
 /// Theme extension so any widget can read `context.tr.surface2` etc.
@@ -104,39 +104,40 @@ class TRText {
     double size,
     Color color, {
     FontWeight w = FontWeight.w700,
-  }) => TextStyle(
-    fontFamily: 'Sora',
-    fontSize: size,
-    fontWeight: w,
-    color: color,
-    letterSpacing: 0,
-    height: 1.2,
-  );
+  }) =>
+      TextStyle(
+        fontFamily: 'Sora',
+        fontSize: size,
+        fontWeight: w,
+        color: color,
+        letterSpacing: 0,
+        height: 1.2,
+      );
   static TextStyle body(
     double size,
     Color color, {
     FontWeight w = FontWeight.w400,
-  }) => TextStyle(
-    fontFamily: 'Manrope',
-    fontSize: size,
-    fontWeight: w,
-    color: color,
-    height: 1.45,
-  );
+  }) =>
+      TextStyle(
+        fontFamily: 'Manrope',
+        fontSize: size,
+        fontWeight: w,
+        color: color,
+        height: 1.45,
+      );
   static TextStyle mono(double size, Color color) => TextStyle(
-    fontFamily: 'JetBrainsMono',
-    fontSize: size,
-    color: color,
-    letterSpacing: 0,
-  );
+        fontFamily: 'JetBrainsMono',
+        fontSize: size,
+        color: color,
+        letterSpacing: 0,
+      );
 }
 
 ThemeData buildTheme(ThemeController ctl) {
   final c = ctl.colors;
-  final brightness =
-      ctl.effectiveMode == TRThemeMode.light
-          ? Brightness.light
-          : Brightness.dark;
+  final brightness = ctl.effectiveMode == TRThemeMode.light
+      ? Brightness.light
+      : Brightness.dark;
   final base = ThemeData(brightness: brightness, useMaterial3: true);
   return base.copyWith(
     scaffoldBackgroundColor: c.bg,

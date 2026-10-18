@@ -10,6 +10,7 @@ import '../../core/config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/auth/auth_service.dart';
 import 'ringer.dart';
+import 'window_attention.dart';
 
 /// Calls — port of components/calls/call-context.tsx.
 ///
@@ -82,7 +83,8 @@ Map<String, dynamic> _payloadOf(dynamic msg) {
   var m = (msg is Map) ? Map<String, dynamic>.from(msg) : <String, dynamic>{};
   if (m['payload'] is Map) {
     final p = Map<String, dynamic>.from(m['payload']);
-    if (p['payload'] is Map && p.containsKey('event')) return Map<String, dynamic>.from(p['payload']);
+    if (p['payload'] is Map && p.containsKey('event'))
+      return Map<String, dynamic>.from(p['payload']);
     return p;
   }
   return m;
@@ -104,8 +106,12 @@ const _iceServers = [
   },
 ];
 
-bool get canShareScreen => kIsWeb || defaultTargetPlatform != TargetPlatform.iOS;
-bool get isPhone => !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+bool get canShareScreen =>
+    kIsWeb || defaultTargetPlatform != TargetPlatform.iOS;
+bool get isPhone =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
 bool get isDesktopNative =>
     !kIsWeb &&
     (defaultTargetPlatform == TargetPlatform.windows ||
@@ -126,7 +132,15 @@ class CallController extends ChangeNotifier {
   MediaStream? localStream;
   final RTCVideoRenderer localRenderer = RTCVideoRenderer();
   bool _localReady = false;
-  bool muted = false, cameraOff = false, speakerOn = true, sharing = false, minimized = false;
+  bool get isLocalReady => _localReady && localRenderer.textureId != null;
+  bool isPeerReady(String peerId) =>
+      peers[peerId]?.rendererReady == true &&
+      peers[peerId]?.renderer.textureId != null;
+  bool muted = false,
+      cameraOff = false,
+      speakerOn = true,
+      sharing = false,
+      minimized = false;
   String? error;
 
   RealtimeChannel? _inbox;
@@ -148,14 +162,25 @@ class CallController extends ChangeNotifier {
     _inbox = null;
     _inboxUser = uid;
     if (uid == null) return;
-    final ch = db.channel('user:$uid', opts: const RealtimeChannelConfig(self: false, ack: false));
-    ch.onBroadcast(event: 'call-invite', callback: (m) => _onInvite(_payloadOf(m), false));
-    ch.onBroadcast(event: 'group-call-invite', callback: (m) => _onInvite(_payloadOf(m), true));
+    final ch = db.channel(
+      'user:$uid',
+      opts: const RealtimeChannelConfig(self: false, ack: false),
+    );
+    ch.onBroadcast(
+      event: 'call-invite',
+      callback: (m) => _onInvite(_payloadOf(m), false),
+    );
+    ch.onBroadcast(
+      event: 'group-call-invite',
+      callback: (m) => _onInvite(_payloadOf(m), true),
+    );
     ch.onBroadcast(
       event: 'answered-elsewhere',
       callback: (m) {
         final p = _payloadOf(m);
-        if (call != null && call!.callId == p['callId'] && call!.status == CallStatus.incoming) {
+        if (call != null &&
+            call!.callId == p['callId'] &&
+            call!.status == CallStatus.incoming) {
           _outcome = 'answered_elsewhere';
           _cleanup();
         }
@@ -175,8 +200,10 @@ class CallController extends ChangeNotifier {
       isGroup: group,
       isCaller: false,
       title: group
-          ? ((p['groupTitle'] as String?) ?? 'Group call')
-          : ((p['fromName'] as String?)?.isNotEmpty == true ? p['fromName'] : 'Someone'),
+          ? ((p['groupTitle'] as String?) ?? 'Hive call')
+          : ((p['fromName'] as String?)?.isNotEmpty == true
+              ? p['fromName']
+              : 'Someone'),
       avatar: group ? null : p['fromAvatar'] as String?,
       peerUserId: group ? null : p['fromUserId'],
       status: CallStatus.incoming,
@@ -185,6 +212,7 @@ class CallController extends ChangeNotifier {
     _outcome = '';
     minimized = false;
     _ringer.startIncoming();
+    unawaited(WindowAttention.ring());
     _ringTimeout?.cancel();
     _ringTimeout = Timer(const Duration(seconds: 45), () {
       if (call?.status == CallStatus.incoming) _cleanup();
@@ -199,15 +227,33 @@ class CallController extends ChangeNotifier {
   Future<MediaStream> _getMedia(String kind) async {
     final video = kind == 'video';
     Future<MediaStream> req(bool v) => navigator.mediaDevices.getUserMedia({
-          'audio': {'echoCancellation': true, 'noiseSuppression': true, 'autoGainControl': true},
-          'video': v ? {'facingMode': 'user', 'width': {'ideal': 1280}, 'height': {'ideal': 720}} : false,
+          'audio': {
+            'echoCancellation': true,
+            'noiseSuppression': true,
+            'autoGainControl': true,
+          },
+          'video': v
+              ? {
+                  'facingMode': 'user',
+                  'width': {'ideal': 1280},
+                  'height': {'ideal': 720},
+                }
+              : false,
         });
     MediaStream s;
+    // A busy/missing device can make getUserMedia hang forever — that froze calls.
     try {
-      s = await req(video);
+      s = await req(video).timeout(const Duration(seconds: 12));
     } catch (e) {
-      if (!video) throw Exception('Microphone permission denied or no microphone found.');
-      s = await req(false); // camera missing/busy → audio only
+      if (!video)
+        throw Exception('Microphone permission denied or no microphone found.');
+      try {
+        s = await req(false).timeout(
+          const Duration(seconds: 12),
+        ); // camera missing/busy → audio only
+      } catch (_) {
+        throw Exception('Microphone permission denied or no microphone found.');
+      }
     }
     if (!_localReady) {
       await localRenderer.initialize();
@@ -222,7 +268,11 @@ class CallController extends ChangeNotifier {
     return s;
   }
 
-  Future<CallPeer> _peer(String userId, {String name = '', String? avatar}) async {
+  Future<CallPeer> _peer(
+    String userId, {
+    String name = '',
+    String? avatar,
+  }) async {
     final existing = peers[userId];
     if (existing != null && existing.pc != null) return existing;
     final peer = existing ?? CallPeer(userId, name, avatar);
@@ -242,7 +292,8 @@ class CallController extends ChangeNotifier {
       await pc.addTrack(t, localStream!);
     }
     // Voice calls still reserve a video slot so screen sharing can start later.
-    if (call?.isVideo != true || (localStream?.getVideoTracks().isEmpty ?? true)) {
+    if (call?.isVideo != true ||
+        (localStream?.getVideoTracks().isEmpty ?? true)) {
       await pc.addTransceiver(
         kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
         init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendRecv),
@@ -257,7 +308,11 @@ class CallController extends ChangeNotifier {
       if (c.candidate == null) return;
       final body = <String, dynamic>{
         'callId': call?.callId,
-        'candidate': {'candidate': c.candidate, 'sdpMid': c.sdpMid, 'sdpMLineIndex': c.sdpMLineIndex},
+        'candidate': {
+          'candidate': c.candidate,
+          'sdpMid': c.sdpMid,
+          'sdpMLineIndex': c.sdpMLineIndex,
+        },
       };
       if (call?.isGroup == true) body.addAll({'from': _me, 'to': userId});
       _send('ice', body);
@@ -300,131 +355,202 @@ class CallController extends ChangeNotifier {
     }
   }
 
-  Future<void> _sendTo(String topic, String event, Map<String, dynamic> body) async {
-    final ch = db.channel(topic, opts: const RealtimeChannelConfig(self: false, ack: false));
+  Future<void> _sendTo(
+    String topic,
+    String event,
+    Map<String, dynamic> body,
+  ) async {
+    final ch = db.channel(
+      topic,
+      opts: const RealtimeChannelConfig(self: false, ack: false),
+    );
     final ready = Completer<void>();
     ch.subscribe((status, _) {
-      if (status == RealtimeSubscribeStatus.subscribed && !ready.isCompleted) ready.complete();
+      if (status == RealtimeSubscribeStatus.subscribed && !ready.isCompleted)
+        ready.complete();
     });
     await ready.future.timeout(const Duration(seconds: 6), onTimeout: () {});
     try {
       await ch.sendBroadcastMessage(event: event, payload: {'v': 1, ...body});
     } finally {
-      unawaited(Future.delayed(const Duration(seconds: 1), () => db.removeChannel(ch)));
+      unawaited(
+        Future.delayed(const Duration(seconds: 1), () => db.removeChannel(ch)),
+      );
     }
   }
 
   Future<void> _subscribeCall(String topic) async {
-    final ch = db.channel(topic, opts: const RealtimeChannelConfig(self: false, ack: false));
+    final ch = db.channel(
+      topic,
+      opts: const RealtimeChannelConfig(self: false, ack: false),
+    );
     _callCh = ch;
     _wire(ch);
     final ready = Completer<void>();
     ch.subscribe((status, _) {
-      if (status == RealtimeSubscribeStatus.subscribed && !ready.isCompleted) ready.complete();
+      if (status == RealtimeSubscribeStatus.subscribed && !ready.isCompleted)
+        ready.complete();
     });
     await ready.future.timeout(const Duration(seconds: 5), onTimeout: () {});
   }
 
-  bool _forMe(Map<String, dynamic> p) => call?.isGroup != true || p['to'] == null || p['to'] == _me;
-  String _fromOf(Map<String, dynamic> p) => call?.isGroup == true ? (p['from'] as String? ?? '') : (call?.peerUserId ?? '');
+  bool _forMe(Map<String, dynamic> p) =>
+      call?.isGroup != true || p['to'] == null || p['to'] == _me;
+  String _fromOf(Map<String, dynamic> p) => call?.isGroup == true
+      ? (p['from'] as String? ?? '')
+      : (call?.peerUserId ?? '');
 
   void _wire(RealtimeChannel ch) {
-    ch.onBroadcast(event: 'accept', callback: (_) async {
-      // 1:1 — callee accepted, caller makes the offer (website behaviour).
-      final c = call;
-      if (c == null || c.isGroup || !c.isCaller) return;
-      c.status = CallStatus.connecting;
-      _ringer.stop();
-      notifyListeners();
-      final peer = peers[c.peerUserId];
-      final pc = peer?.pc;
-      if (pc == null) return;
-      final offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      await _send('offer', {'callId': c.callId, 'sdp': {'type': offer.type, 'sdp': offer.sdp}});
-    });
-    ch.onBroadcast(event: 'reject', callback: (m) {
-      final c = call;
-      if (c == null) return;
-      if (!c.isGroup) {
-        _outcome = c.isCaller ? 'cancelled' : 'declined';
-        _cleanup(toast: 'Call declined');
-      }
-    });
-    ch.onBroadcast(event: 'hangup', callback: (_) {
-      if (call?.isGroup == true) return;
-      _cleanup(toast: 'Call ended');
-    });
-    ch.onBroadcast(event: 'leave', callback: (m) {
-      final p = _payloadOf(m);
-      final uid = p['userId'] as String?;
-      if (uid == null) return;
-      _closePeer(uid);
-      notifyListeners();
-    });
-    ch.onBroadcast(event: 'join', callback: (m) async {
-      // Group: earlier joiners offer to later joiners (avoids both sides offering).
-      final p = _payloadOf(m);
-      final uid = p['userId'] as String?;
-      final at = (p['joinedAt'] as num?)?.toInt() ?? 0;
-      if (uid == null || uid == _me || call?.isGroup != true || _joinedAt == 0) return;
-      final iAmEarlier = _joinedAt < at || (_joinedAt == at && (_me ?? '').compareTo(uid) < 0);
-      if (!iAmEarlier) return;
-      final peer = await _peer(uid, name: p['name'] ?? 'Member', avatar: p['avatar']);
-      if (call!.status == CallStatus.outgoing) call!.status = CallStatus.connecting;
-      final offer = await peer.pc!.createOffer();
-      await peer.pc!.setLocalDescription(offer);
-      await _send('offer', {
-        'callId': call!.callId,
-        'from': _me,
-        'to': uid,
-        'name': auth.profile?.displayName,
-        'avatar': auth.profile?.avatarUrl,
-        'sdp': {'type': offer.type, 'sdp': offer.sdp},
-      });
-      notifyListeners();
-    });
-    ch.onBroadcast(event: 'offer', callback: (m) async {
-      final p = _payloadOf(m);
-      if (!_forMe(p) || call == null) return;
-      final from = _fromOf(p);
-      final peer = await _peer(from, name: p['name'] ?? call!.title, avatar: p['avatar']);
-      final sdp = Map<String, dynamic>.from(p['sdp']);
-      await peer.pc!.setRemoteDescription(RTCSessionDescription(sdp['sdp'], sdp['type']));
-      peer.remoteSet = true;
-      await _drain(peer);
-      final answer = await peer.pc!.createAnswer();
-      await peer.pc!.setLocalDescription(answer);
-      final body = <String, dynamic>{'callId': call!.callId, 'sdp': {'type': answer.type, 'sdp': answer.sdp}};
-      if (call!.isGroup) body.addAll({'from': _me, 'to': from});
-      await _send('answer', body);
-    });
-    ch.onBroadcast(event: 'answer', callback: (m) async {
-      final p = _payloadOf(m);
-      if (!_forMe(p)) return;
-      final peer = peers[_fromOf(p)];
-      if (peer?.pc == null) return;
-      final sdp = Map<String, dynamic>.from(p['sdp']);
-      await peer!.pc!.setRemoteDescription(RTCSessionDescription(sdp['sdp'], sdp['type']));
-      peer.remoteSet = true;
-      await _drain(peer);
-    });
-    ch.onBroadcast(event: 'ice', callback: (m) async {
-      final p = _payloadOf(m);
-      if (!_forMe(p)) return;
-      final cand = Map<String, dynamic>.from(p['candidate'] ?? {});
-      final ice = RTCIceCandidate(cand['candidate'], cand['sdpMid'], (cand['sdpMLineIndex'] as num?)?.toInt());
-      final peer = peers[_fromOf(p)];
-      if (peer == null || peer.pc == null || !peer.remoteSet) {
-        // Arrived before the offer — keep it for later.
-        final holder = peers.putIfAbsent(_fromOf(p), () => CallPeer(_fromOf(p), '', null));
-        holder.pendingIce.add(ice);
-        return;
-      }
-      try {
-        await peer.pc!.addCandidate(ice);
-      } catch (_) {}
-    });
+    ch.onBroadcast(
+      event: 'accept',
+      callback: (_) async {
+        // 1:1 — callee accepted, caller makes the offer (website behaviour).
+        final c = call;
+        if (c == null || c.isGroup || !c.isCaller) return;
+        c.status = CallStatus.connecting;
+        _ringer.stop();
+        notifyListeners();
+        final peer = peers[c.peerUserId];
+        final pc = peer?.pc;
+        if (pc == null) return;
+        final offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await _send('offer', {
+          'callId': c.callId,
+          'sdp': {'type': offer.type, 'sdp': offer.sdp},
+        });
+      },
+    );
+    ch.onBroadcast(
+      event: 'reject',
+      callback: (m) {
+        final c = call;
+        if (c == null) return;
+        if (!c.isGroup) {
+          _outcome = c.isCaller ? 'cancelled' : 'declined';
+          _cleanup(toast: 'Call declined');
+        }
+      },
+    );
+    ch.onBroadcast(
+      event: 'hangup',
+      callback: (_) {
+        if (call?.isGroup == true) return;
+        _cleanup(toast: 'Call ended');
+      },
+    );
+    ch.onBroadcast(
+      event: 'leave',
+      callback: (m) {
+        final p = _payloadOf(m);
+        final uid = p['userId'] as String?;
+        if (uid == null) return;
+        _closePeer(uid);
+        notifyListeners();
+      },
+    );
+    ch.onBroadcast(
+      event: 'join',
+      callback: (m) async {
+        // Group: earlier joiners offer to later joiners (avoids both sides offering).
+        final p = _payloadOf(m);
+        final uid = p['userId'] as String?;
+        final at = (p['joinedAt'] as num?)?.toInt() ?? 0;
+        if (uid == null ||
+            uid == _me ||
+            call?.isGroup != true ||
+            _joinedAt == 0) return;
+        final iAmEarlier = _joinedAt < at ||
+            (_joinedAt == at && (_me ?? '').compareTo(uid) < 0);
+        if (!iAmEarlier) return;
+        final peer = await _peer(
+          uid,
+          name: p['name'] ?? 'Member',
+          avatar: p['avatar'],
+        );
+        if (call!.status == CallStatus.outgoing)
+          call!.status = CallStatus.connecting;
+        final offer = await peer.pc!.createOffer();
+        await peer.pc!.setLocalDescription(offer);
+        await _send('offer', {
+          'callId': call!.callId,
+          'from': _me,
+          'to': uid,
+          'name': auth.profile?.displayName,
+          'avatar': auth.profile?.avatarUrl,
+          'sdp': {'type': offer.type, 'sdp': offer.sdp},
+        });
+        notifyListeners();
+      },
+    );
+    ch.onBroadcast(
+      event: 'offer',
+      callback: (m) async {
+        final p = _payloadOf(m);
+        if (!_forMe(p) || call == null) return;
+        final from = _fromOf(p);
+        final peer = await _peer(
+          from,
+          name: p['name'] ?? call!.title,
+          avatar: p['avatar'],
+        );
+        final sdp = Map<String, dynamic>.from(p['sdp']);
+        await peer.pc!.setRemoteDescription(
+          RTCSessionDescription(sdp['sdp'], sdp['type']),
+        );
+        peer.remoteSet = true;
+        await _drain(peer);
+        final answer = await peer.pc!.createAnswer();
+        await peer.pc!.setLocalDescription(answer);
+        final body = <String, dynamic>{
+          'callId': call!.callId,
+          'sdp': {'type': answer.type, 'sdp': answer.sdp},
+        };
+        if (call!.isGroup) body.addAll({'from': _me, 'to': from});
+        await _send('answer', body);
+      },
+    );
+    ch.onBroadcast(
+      event: 'answer',
+      callback: (m) async {
+        final p = _payloadOf(m);
+        if (!_forMe(p)) return;
+        final peer = peers[_fromOf(p)];
+        if (peer?.pc == null) return;
+        final sdp = Map<String, dynamic>.from(p['sdp']);
+        await peer!.pc!.setRemoteDescription(
+          RTCSessionDescription(sdp['sdp'], sdp['type']),
+        );
+        peer.remoteSet = true;
+        await _drain(peer);
+      },
+    );
+    ch.onBroadcast(
+      event: 'ice',
+      callback: (m) async {
+        final p = _payloadOf(m);
+        if (!_forMe(p)) return;
+        final cand = Map<String, dynamic>.from(p['candidate'] ?? {});
+        final ice = RTCIceCandidate(
+          cand['candidate'],
+          cand['sdpMid'],
+          (cand['sdpMLineIndex'] as num?)?.toInt(),
+        );
+        final peer = peers[_fromOf(p)];
+        if (peer == null || peer.pc == null || !peer.remoteSet) {
+          // Arrived before the offer — keep it for later.
+          final holder = peers.putIfAbsent(
+            _fromOf(p),
+            () => CallPeer(_fromOf(p), '', null),
+          );
+          holder.pendingIce.add(ice);
+          return;
+        }
+        try {
+          await peer.pc!.addCandidate(ice);
+        } catch (_) {}
+      },
+    );
   }
 
   // ---------------------------------------------------------------- actions
@@ -460,7 +586,8 @@ class CallController extends ChangeNotifier {
       await _sendTo('user:$peerUserId', 'call-invite', {
         'callId': callId,
         'fromUserId': _me,
-        'fromName': auth.profile?.displayName ?? auth.profile?.username ?? 'Someone',
+        'fromName':
+            auth.profile?.displayName ?? auth.profile?.username ?? 'Someone',
         'fromAvatar': auth.profile?.avatarUrl,
         'kind': kind,
         'chatId': chatId,
@@ -476,13 +603,30 @@ class CallController extends ChangeNotifier {
   }
 
   /// Ask the website's server to ring the other person's phone if their app is closed.
-  Future<void> _wakePhone(String callee, String callId, String chatId, String kind, {String type = 'call'}) async {
+  Future<void> _wakePhone(
+    String callee,
+    String callId,
+    String chatId,
+    String kind, {
+    String type = 'call',
+  }) async {
     final token = db.auth.currentSession?.accessToken;
     if (token == null || chatId.isEmpty) return;
     try {
-      await http.post(Uri.parse('${AppConfig.siteUrl}/api/public/v1/push/call'),
-          headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
-          body: jsonEncode({'callee_id': callee, 'call_id': callId, 'chat_id': chatId, 'kind': kind == 'video' ? 'video' : 'audio', 'type': type}));
+      await http.post(
+        Uri.parse('${AppConfig.siteUrl}/api/public/v1/push/call'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'callee_id': callee,
+          'call_id': callId,
+          'chat_id': chatId,
+          'kind': kind == 'video' ? 'video' : 'audio',
+          'type': type,
+        }),
+      );
     } catch (_) {}
   }
 
@@ -496,7 +640,7 @@ class CallController extends ChangeNotifier {
     if (me == null) return;
     if (call != null) return _fail('Already in a call');
     final others = members.where((m) => m.userId != me).toList();
-    if (others.isEmpty) return _fail('Nobody else in this group yet');
+    if (others.isEmpty) return _fail('Nobody else in this hive yet');
     final callId = _uuid();
     call = ActiveCall(
       callId: callId,
@@ -524,7 +668,11 @@ class CallController extends ChangeNotifier {
         'kind': kind,
         'chatId': chatId,
       };
-      await Future.wait(others.map((m) => _sendTo('user:${m.userId}', 'group-call-invite', invite)));
+      await Future.wait(
+        others.map(
+          (m) => _sendTo('user:${m.userId}', 'group-call-invite', invite),
+        ),
+      );
       _ringTimeout = Timer(const Duration(seconds: 45), () {
         if (call?.status == CallStatus.outgoing) hangup();
       });
@@ -540,6 +688,7 @@ class CallController extends ChangeNotifier {
     _ringer.stop();
     _ringTimeout?.cancel();
     c.status = CallStatus.connecting;
+    unawaited(WindowAttention.calm());
     notifyListeners();
     _notifyOtherDevices(c.callId, 'accepted');
     try {
@@ -561,7 +710,8 @@ class CallController extends ChangeNotifier {
       }
       // Watchdog: give up if nothing connects within 30s.
       _ringTimeout = Timer(const Duration(seconds: 30), () {
-        if (call != null && call!.status != CallStatus.active) _cleanup(toast: 'Could not connect');
+        if (call != null && call!.status != CallStatus.active)
+          _cleanup(toast: 'Could not connect');
       });
     } catch (e) {
       _fail(e.toString().replaceFirst('Exception: ', ''));
@@ -588,7 +738,13 @@ class CallController extends ChangeNotifier {
     } else {
       await _send('hangup', {'callId': c.callId});
       if (c.isCaller && c.status != CallStatus.active && c.peerUserId != null) {
-        _wakePhone(c.peerUserId!, c.callId, c.chatId, c.kind, type: 'call_cancel');
+        _wakePhone(
+          c.peerUserId!,
+          c.callId,
+          c.chatId,
+          c.kind,
+          type: 'call_cancel',
+        );
       }
     }
     _cleanup();
@@ -597,7 +753,10 @@ class CallController extends ChangeNotifier {
   void _notifyOtherDevices(String callId, String action) {
     final me = _me;
     if (me == null || _inbox == null) return;
-    _inbox!.sendBroadcastMessage(event: 'answered-elsewhere', payload: {'v': 1, 'callId': callId, 'action': action});
+    _inbox!.sendBroadcastMessage(
+      event: 'answered-elsewhere',
+      payload: {'v': 1, 'callId': callId, 'action': action},
+    );
   }
 
   // ---------------------------------------------------------------- controls
@@ -639,7 +798,8 @@ class CallController extends ChangeNotifier {
       final pc = p.pc;
       if (pc == null) continue;
       for (final tr in await pc.getTransceivers()) {
-        if (tr.receiver.track?.kind == 'video' || tr.sender.track?.kind == 'video') {
+        if (tr.receiver.track?.kind == 'video' ||
+            tr.sender.track?.kind == 'video') {
           out.add(tr.sender);
           break;
         }
@@ -665,12 +825,17 @@ class CallController extends ChangeNotifier {
         );
         if (ok) await FlutterBackground.enableBackgroundExecution();
       }
-      final MediaStream screen = await navigator.mediaDevices.getDisplayMedia(desktopSourceId != null
-          ? {
-              'video': {'deviceId': {'exact': desktopSourceId}, 'mandatory': {'frameRate': 15.0}},
-              'audio': false,
-            }
-          : {'video': true, 'audio': false});
+      final MediaStream screen = await navigator.mediaDevices.getDisplayMedia(
+        desktopSourceId != null
+            ? {
+                'video': {
+                  'deviceId': {'exact': desktopSourceId},
+                  'mandatory': {'frameRate': 15.0},
+                },
+                'audio': false,
+              }
+            : {'video': true, 'audio': false},
+      );
       final track = screen.getVideoTracks().first;
       final cams = localStream?.getVideoTracks() ?? [];
       _camTrack = cams.isNotEmpty ? cams.first : null;
@@ -728,6 +893,7 @@ class CallController extends ChangeNotifier {
   void _cleanup({String? toast}) {
     final c = call;
     if (c == null) return;
+    unawaited(WindowAttention.calm());
     _ringer.stop();
     _ringTimeout?.cancel();
     if (sharing) unawaited(stopScreenShare());
@@ -755,8 +921,11 @@ class CallController extends ChangeNotifier {
     final me = _me;
     if (me == null || _outcome == 'answered_elsewhere') return;
     final wasActive = c.activeAt != null;
-    final outcome = _outcome.isNotEmpty ? _outcome : (wasActive ? 'completed' : (c.isCaller ? 'cancelled' : 'missed'));
-    final peerId = c.peerUserId ?? (peers.keys.isNotEmpty ? peers.keys.first : null);
+    final outcome = _outcome.isNotEmpty
+        ? _outcome
+        : (wasActive ? 'completed' : (c.isCaller ? 'cancelled' : 'missed'));
+    final peerId =
+        c.peerUserId ?? (peers.keys.isNotEmpty ? peers.keys.first : null);
     final row = {
       'user_id': me,
       'call_id': c.callId,
@@ -767,15 +936,24 @@ class CallController extends ChangeNotifier {
       'direction': c.isCaller ? 'outgoing' : 'incoming',
       'outcome': outcome,
       'started_at': c.startedAt.toUtc().toIso8601String(),
-      'duration_sec': wasActive ? DateTime.now().difference(c.activeAt!).inSeconds : 0,
+      'duration_sec':
+          wasActive ? DateTime.now().difference(c.activeAt!).inSeconds : 0,
     };
-    db.from('call_logs').upsert(row, onConflict: 'user_id,call_id').then((_) {}, onError: (e) => debugPrint('[call] log failed: $e'));
+    db
+        .from('call_logs')
+        .upsert(row, onConflict: 'user_id,call_id')
+        .then((_) {}, onError: (e) => debugPrint('[call] log failed: $e'));
   }
 
   Future<List<Map<String, dynamic>>> history() async {
     final me = _me;
     if (me == null) return [];
-    final rows = await db.from('call_logs').select().eq('user_id', me).order('started_at', ascending: false).limit(200);
+    final rows = await db
+        .from('call_logs')
+        .select()
+        .eq('user_id', me)
+        .order('started_at', ascending: false)
+        .limit(200);
     return List<Map<String, dynamic>>.from(rows);
   }
 

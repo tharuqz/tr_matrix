@@ -31,13 +31,20 @@ class Attachment extends StatelessWidget {
         final url = snap.data;
         if (snap.connectionState != ConnectionState.done) {
           return SizedBox(
-              width: sticker ? 160 : 220,
-              height: sticker ? 160 : 120,
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: fg)));
+            width: sticker ? 160 : 220,
+            height: sticker ? 160 : 120,
+            child: Center(
+              child: CircularProgressIndicator(strokeWidth: 2, color: fg),
+            ),
+          );
         }
         if (url == null) return _FileTile(msg: msg, fg: fg, url: null);
         if (sticker) {
-          return SizedBox(width: 160, height: 160, child: Image.network(url, fit: BoxFit.contain));
+          return SizedBox(
+            width: 160,
+            height: 160,
+            child: Image.network(url, fit: BoxFit.contain),
+          );
         }
         if (type.startsWith('image/')) {
           return GestureDetector(
@@ -45,10 +52,17 @@ class Attachment extends StatelessWidget {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(TRRadius.lg),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 320, maxWidth: 320, minWidth: 120),
-                child: Image.network(url,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _FileTile(msg: msg, fg: fg, url: url)),
+                constraints: const BoxConstraints(
+                  maxHeight: 320,
+                  maxWidth: 320,
+                  minWidth: 120,
+                ),
+                child: Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      _FileTile(msg: msg, fg: fg, url: url),
+                ),
               ),
             ),
           );
@@ -70,49 +84,87 @@ class _FileTile extends StatelessWidget {
     final video = (msg.mediaType ?? '').startsWith('video/');
     return InkWell(
       borderRadius: BorderRadius.circular(TRRadius.lg),
-      onTap: url == null ? null : () => launchUrl(Uri.parse(url!), mode: LaunchMode.externalApplication),
+      onTap: url == null
+          ? null
+          : () => launchUrl(
+                Uri.parse(url!),
+                mode: LaunchMode.externalApplication,
+              ),
       child: Container(
         width: 240,
         padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(color: fg.withValues(alpha: .1), borderRadius: BorderRadius.circular(TRRadius.lg)),
-        child: Row(children: [
-          Icon(video ? Icons.movie_outlined : Icons.insert_drive_file_outlined, color: fg, size: 30),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(msg.mediaName ?? 'File', maxLines: 1, overflow: TextOverflow.ellipsis, style: TRText.body(13, fg, w: FontWeight.w600)),
-              Text(url == null ? 'Not available' : '${fmtSize(msg.mediaSize)} · tap to open',
-                  style: TRText.body(11, fg.withValues(alpha: .7))),
-            ]),
-          ),
-          Icon(Icons.download_rounded, color: fg.withValues(alpha: .8), size: 20),
-        ]),
+        decoration: BoxDecoration(
+          color: fg.withValues(alpha: .1),
+          borderRadius: BorderRadius.circular(TRRadius.lg),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              video ? Icons.movie_outlined : Icons.insert_drive_file_outlined,
+              color: fg,
+              size: 30,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    msg.mediaName ?? 'File',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TRText.body(13, fg, w: FontWeight.w600),
+                  ),
+                  Text(
+                    url == null
+                        ? 'Not available'
+                        : '${fmtSize(msg.mediaSize)} · tap to open',
+                    style: TRText.body(11, fg.withValues(alpha: .7)),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.download_rounded,
+              color: fg.withValues(alpha: .8),
+              size: 20,
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
 void openImageViewer(BuildContext context, String url, String? name) {
-  Navigator.of(context).push(PageRouteBuilder(
-    opaque: false,
-    barrierColor: Colors.black87,
-    pageBuilder: (ctx, _, __) => Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(
+  Navigator.of(context).push(
+    PageRouteBuilder(
+      opaque: false,
+      barrierColor: Colors.black87,
+      pageBuilder: (ctx, _, __) => Scaffold(
         backgroundColor: Colors.transparent,
-        foregroundColor: Colors.white,
-        title: Text(name ?? '', style: const TextStyle(fontSize: 14)),
-        actions: [
-          IconButton(
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          title: Text(name ?? '', style: const TextStyle(fontSize: 14)),
+          actions: [
+            IconButton(
               tooltip: 'Download',
               icon: const Icon(Icons.download_rounded),
-              onPressed: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication)),
-        ],
-      ),
-      body: GestureDetector(
-        onTap: () => Navigator.pop(ctx),
-        child: Center(child: InteractiveViewer(maxScale: 5, child: Image.network(url))),
+              onPressed: () => launchUrl(
+                Uri.parse(url),
+                mode: LaunchMode.externalApplication,
+              ),
+            ),
+          ],
+        ),
+        body: GestureDetector(
+          onTap: () => Navigator.pop(ctx),
+          child: Center(
+            child: InteractiveViewer(maxScale: 5, child: Image.network(url)),
+          ),
+        ),
       ),
     ),
-  ));
+  );
 }

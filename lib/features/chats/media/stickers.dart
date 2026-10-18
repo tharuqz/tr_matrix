@@ -30,14 +30,25 @@ class StickerStore {
     }).toList();
   }
 
-  static Future<LocalSticker> save(String uid, Uint8List bytes, {bool gif = false}) async {
+  static Future<LocalSticker> save(
+    String uid,
+    Uint8List bytes, {
+    bool gif = false,
+  }) async {
     final id = sha256.convert(bytes).toString();
-    final s = LocalSticker(id, 'trmx-sticker-$id.${gif ? 'gif' : 'png'}', bytes);
+    final s = LocalSticker(
+      id,
+      'trmx-sticker-$id.${gif ? 'gif' : 'png'}',
+      bytes,
+    );
     final p = await SharedPreferences.getInstance();
     final cur = (p.getStringList(_key(uid)) ?? [])
         .where((e) => (jsonDecode(e) as Map)['id'] != id)
         .toList()
-      ..insert(0, jsonEncode({'id': id, 'name': s.name, 'b64': base64Encode(bytes)}));
+      ..insert(
+        0,
+        jsonEncode({'id': id, 'name': s.name, 'b64': base64Encode(bytes)}),
+      );
     await p.setStringList(_key(uid), cur);
     return s;
   }
@@ -45,24 +56,36 @@ class StickerStore {
   static Future<void> remove(String uid, String id) async {
     final p = await SharedPreferences.getInstance();
     await p.setStringList(
-        _key(uid), (p.getStringList(_key(uid)) ?? []).where((e) => (jsonDecode(e) as Map)['id'] != id).toList());
+      _key(uid),
+      (p.getStringList(_key(uid)) ?? [])
+          .where((e) => (jsonDecode(e) as Map)['id'] != id)
+          .toList(),
+    );
   }
 
   /// Turn any picture into a 512×512 PNG sticker (GIFs are kept as-is if small enough).
   static Uint8List make(Uint8List src, String name) {
     if (src.length > 10 * 1024 * 1024) throw 'Choose an image under 10 MB.';
     if (name.toLowerCase().endsWith('.gif')) {
-      if (src.length > stickerLimit) throw 'Animated GIF stickers must be under 1 MB.';
+      if (src.length > stickerLimit)
+        throw 'Animated GIF stickers must be under 1 MB.';
       return src;
     }
     final im = img.decodeImage(src);
     if (im == null) throw 'That picture could not be opened.';
-    final scale = (512 / im.width) < (512 / im.height) ? 512 / im.width : 512 / im.height;
+    final scale =
+        (512 / im.width) < (512 / im.height) ? 512 / im.width : 512 / im.height;
     final w = (im.width * scale).round(), h = (im.height * scale).round();
     final canvas = img.Image(width: 512, height: 512, numChannels: 4);
-    img.compositeImage(canvas, img.copyResize(im, width: w, height: h), dstX: (512 - w) ~/ 2, dstY: (512 - h) ~/ 2);
+    img.compositeImage(
+      canvas,
+      img.copyResize(im, width: w, height: h),
+      dstX: (512 - w) ~/ 2,
+      dstY: (512 - h) ~/ 2,
+    );
     final out = Uint8List.fromList(img.encodePng(canvas));
-    if (out.length > stickerLimit) throw 'Sticker is too detailed. Choose a simpler image.';
+    if (out.length > stickerLimit)
+      throw 'Sticker is too detailed. Choose a simpler image.';
     return out;
   }
 }
@@ -92,13 +115,20 @@ class _StickerPickerState extends State<StickerPicker> {
   }
 
   Future<void> _create() async {
-    final r = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
+    final r = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
     final f = r?.files.firstOrNull;
     if (f?.bytes == null) return;
     setState(() => _busy = true);
     try {
       final bytes = StickerStore.make(f!.bytes!, f.name);
-      await StickerStore.save(widget.uid, bytes, gif: f.name.toLowerCase().endsWith('.gif'));
+      await StickerStore.save(
+        widget.uid,
+        bytes,
+        gif: f.name.toLowerCase().endsWith('.gif'),
+      );
       await _reload();
     } catch (e) {
       if (mounted) showToast(context, e.toString(), error: true);
@@ -115,9 +145,16 @@ class _StickerPickerState extends State<StickerPicker> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-          color: c.surface2, borderRadius: BorderRadius.circular(TRRadius.x2l), border: Border.all(color: c.border)),
+        color: c.surface2,
+        borderRadius: BorderRadius.circular(TRRadius.x2l),
+        border: Border.all(color: c.border),
+      ),
       child: GridView.builder(
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 88, mainAxisSpacing: 8, crossAxisSpacing: 8),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 88,
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+        ),
         itemCount: _items.length + 1,
         itemBuilder: (_, i) {
           if (i == 0) {
@@ -126,10 +163,17 @@ class _StickerPickerState extends State<StickerPicker> {
               onTap: _busy ? null : _create,
               builder: (_, h) => Container(
                 decoration: BoxDecoration(
-                    color: h ? context.accent.withValues(alpha: .15) : c.surface3,
-                    borderRadius: BorderRadius.circular(TRRadius.lg)),
+                  color: h ? context.accent.withValues(alpha: .15) : c.surface3,
+                  borderRadius: BorderRadius.circular(TRRadius.lg),
+                ),
                 child: _busy
-                    ? const Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                    ? const Center(
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
                     : Icon(Icons.add_photo_alternate_outlined, color: c.text2),
               ),
             );
@@ -141,7 +185,10 @@ class _StickerPickerState extends State<StickerPicker> {
               await StickerStore.remove(widget.uid, s.id);
               _reload();
             },
-            child: Tooltip(message: 'Tap to send · long-press to remove', child: Image.memory(s.bytes, fit: BoxFit.contain)),
+            child: Tooltip(
+              message: 'Tap to send · long-press to remove',
+              child: Image.memory(s.bytes, fit: BoxFit.contain),
+            ),
           );
         },
       ),

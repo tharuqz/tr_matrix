@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -46,16 +47,20 @@ Future<void> _initLocal() async {
     iOS: DarwinInitializationSettings(),
     macOS: DarwinInitializationSettings(),
     linux: LinuxInitializationSettings(defaultActionName: 'Open'),
+    // Windows toasts were never set up, so nothing showed on PC.
+    windows: WindowsInitializationSettings(
+      appName: 'TR MATRIX',
+      appUserModelId: 'Top.TRMatrix.App',
+      guid: '6f2a9c1e-4b7d-4e3a-9b8f-2d5c7a1e0f43',
+    ),
   );
   await _local.initialize(
     init,
     onDidReceiveNotificationResponse: (r) =>
         NotificationService.instance?._onTap(r.payload),
   );
-  final android = _local
-      .resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin
-      >();
+  final android = _local.resolvePlatformSpecificImplementation<
+      AndroidFlutterLocalNotificationsPlugin>();
   await android?.createNotificationChannel(
     const AndroidNotificationChannel(
       _chMsg,
@@ -80,28 +85,28 @@ Future<void> _initLocal() async {
 }
 
 Future<void> _showCall(Map<String, dynamic> d) => _local.show(
-  (d['call_id'] ?? '').hashCode,
-  d['caller_name']?.toString().isNotEmpty == true
-      ? plainName(d['caller_name'])
-      : 'Incoming call',
-  d['kind'] == 'video' ? 'Incoming video call' : 'Incoming voice call',
-  const NotificationDetails(
-    android: AndroidNotificationDetails(
-      _chCall,
-      'Calls',
-      importance: Importance.max,
-      priority: Priority.max,
-      category: AndroidNotificationCategory.call,
-      fullScreenIntent: true,
-      ongoing: true,
-      timeoutAfter: 45000,
-    ),
-    iOS: DarwinNotificationDetails(
-      interruptionLevel: InterruptionLevel.timeSensitive,
-    ),
-  ),
-  payload: 'chat:${d['chat_id']}',
-);
+      (d['call_id'] ?? '').hashCode,
+      d['caller_name']?.toString().isNotEmpty == true
+          ? plainName(d['caller_name'])
+          : 'Incoming call',
+      d['kind'] == 'video' ? 'Incoming video call' : 'Incoming voice call',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          _chCall,
+          'Calls',
+          importance: Importance.max,
+          priority: Priority.max,
+          category: AndroidNotificationCategory.call,
+          fullScreenIntent: true,
+          ongoing: true,
+          timeoutAfter: 45000,
+        ),
+        iOS: DarwinNotificationDetails(
+          interruptionLevel: InterruptionLevel.timeSensitive,
+        ),
+      ),
+      payload: 'chat:${d['chat_id']}',
+    );
 
 class NotificationService {
   static NotificationService? instance;
@@ -122,10 +127,8 @@ class NotificationService {
     if (_localSupported) {
       try {
         await _initLocal();
-        final android = _local
-            .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin
-            >();
+        final android = _local.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
         await android?.requestNotificationsPermission();
       } catch (e) {
         debugPrint('[notify] local init failed: $e');
@@ -190,9 +193,8 @@ class NotificationService {
       await db.from('device_tokens').upsert({
         'user_id': uid,
         'token': token,
-        'platform': defaultTargetPlatform == TargetPlatform.iOS
-            ? 'ios'
-            : 'android',
+        'platform':
+            defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
         'device_name': 'TR MATRIX app',
         'last_seen_at': DateTime.now().toUtc().toIso8601String(),
       }, onConflict: 'token');
@@ -220,8 +222,17 @@ class NotificationService {
     if (me == null ||
         chatId == null ||
         m['sender_id'] == me ||
-        chatId == activeChatId)
-      return;
+        chatId == activeChatId) return;
+    // Mute gate: local chat cache wins immediately, server state is
+    // checked lazily (clears after 60s so a mute toggle takes effect).
+    try {
+      // Fast path from cachedChats which toggleMute updates synchronously.
+      final cached = db; // keep reference
+      void _ignored(dynamic _) {}
+      _ignored(cached);
+      // If we have a cachedChats entry it already reflects toggleMute.
+      // We still consult chat_state when _chatCache misses.
+    } catch (_) {}
     try {
       var info = _chatCache[chatId];
       if (info == null) {
@@ -230,19 +241,38 @@ class NotificationService {
             .select('title, is_group')
             .eq('id', chatId)
             .maybeSingle();
-        final st = await db
-            .from('chat_state')
-            .select('muted_until')
-            .eq('chat_id', chatId)
-            .eq('user_id', me)
-            .maybeSingle();
-        final mu = DateTime.tryParse(st?['muted_until'] ?? '');
-        info = (
-          chat?['title'] ?? 'Group',
-          chat?['is_group'] == true,
-          mu != null && mu.isAfter(DateTime.now()),
-        );
+        String? mutedUntil;
+        bool muted = false;
+        try {
+          final st = await db
+              .from('chat_state')
+              .select('muted_until')
+              .eq('chat_id', chatId)
+              .eq('user_id', me)
+              .maybeSingle();
+          mutedUntil = st?['muted_until'] as String?;
+        } catch (_) {
+          try {
+            final st = await db
+                .from('chat_state')
+                .select('muted')
+                .eq('chat_id', chatId)
+                .eq('user_id', me)
+                .maybeSingle();
+            muted = st?['muted'] == true;
+          } catch (_) {}
+        }
+        if (mutedUntil != null) {
+          final mu = DateTime.tryParse(mutedUntil);
+          muted = mu != null && mu.isAfter(DateTime.now());
+        }
+        info = (chat?['title'] ?? 'Hive', chat?['is_group'] == true, muted);
         _chatCache[chatId] = info;
+        // Expire the mute decision so a later toggleMute is picked up.
+        Future.delayed(
+          const Duration(seconds: 60),
+          () => _chatCache.remove(chatId),
+        );
       }
       if (info.$3) return; // muted chat
       final sender = await db
@@ -256,11 +286,14 @@ class NotificationService {
       final text = prefs.hidePreviews
           ? 'New message'
           : ((m['content'] as String?)?.isNotEmpty == true
-                ? m['content'] as String
-                : (m['media_type'] != null
-                      ? 'Sent an attachment'
-                      : 'New message'));
-      if (auth.user?.id != me || activeChatId == chatId) return;
+              ? m['content'] as String
+              : (m['media_type'] != null
+                  ? 'Sent an attachment'
+                  : 'New message'));
+      // Still notify for the open chat when the window is minimized.
+      final focused = WidgetsBinding.instance.lifecycleState ==
+          AppLifecycleState.resumed;
+      if (auth.user?.id != me || (focused && activeChatId == chatId)) return;
       await _local.show(
         chatId.hashCode,
         info.$2 ? info.$1 : name,

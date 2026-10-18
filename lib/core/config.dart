@@ -6,8 +6,12 @@ class AppConfig {
     'SUPABASE_URL',
     defaultValue: 'https://aybstbwgqdqfyvvvcwwr.supabase.co',
   );
+
   /// Your website — used to ask its server to send phone notifications.
-  static const siteUrl = String.fromEnvironment('SITE_URL', defaultValue: 'https://trmatrix.top');
+  static const siteUrl = String.fromEnvironment(
+    'SITE_URL',
+    defaultValue: 'https://trmatrix.top',
+  );
 
   static const supabaseAnonKey = String.fromEnvironment(
     'SUPABASE_ANON_KEY',

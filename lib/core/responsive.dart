@@ -26,19 +26,26 @@ class AdaptiveBuilder extends StatelessWidget {
   final WidgetBuilder mobile;
   final WidgetBuilder? tablet;
   final WidgetBuilder desktop;
-  const AdaptiveBuilder({super.key, required this.mobile, this.tablet, required this.desktop});
+  const AdaptiveBuilder({
+    super.key,
+    required this.mobile,
+    this.tablet,
+    required this.desktop,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, _) {
-      switch (Responsive.of(context)) {
-        case FormFactor.mobile:
-          return mobile(context);
-        case FormFactor.tablet:
-          return (tablet ?? desktop)(context);
-        case FormFactor.desktop:
-          return desktop(context);
-      }
-    });
+    return LayoutBuilder(
+      builder: (context, _) {
+        switch (Responsive.of(context)) {
+          case FormFactor.mobile:
+            return mobile(context);
+          case FormFactor.tablet:
+            return (tablet ?? desktop)(context);
+          case FormFactor.desktop:
+            return desktop(context);
+        }
+      },
+    );
   }
 }
