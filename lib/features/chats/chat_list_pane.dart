@@ -761,6 +761,7 @@ class _ChatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.tr;
+<<<<<<< HEAD
     return GestureDetector(
       onLongPress: onLongPress,
       onSecondaryTap: onLongPress,
@@ -815,6 +816,61 @@ class _ChatTile extends StatelessWidget {
                             padding: const EdgeInsets.only(right: 4),
                             child: Icon(
                               Icons.group_rounded,
+=======
+    return Hoverable(
+      onTap: onTap,
+      builder:
+          (_, h) => AnimatedContainer(
+            duration: matrixDuration(context, 180),
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            padding: EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: AppScope.of(context).theme.compact ? 9 : 14,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(TRRadius.xl),
+              color:
+                  selected
+                      ? context.accent.withValues(alpha: .12)
+                      : (h
+                          ? c.text1.withValues(alpha: .04)
+                          : Colors.transparent),
+            ),
+            child: Row(
+              children: [
+                TRAvatar(name: item.title, url: item.avatarUrl, size: 48),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          if (item.isGroup)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 4),
+                              child: Icon(
+                                Icons.group_rounded,
+                                size: 14,
+                                color: c.text3,
+                              ),
+                            ),
+                          Expanded(
+                            child: Text(
+                              item.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TRText.body(
+                                15,
+                                c.text1,
+                                w: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          if (item.muted)
+                            Icon(
+                              Icons.volume_off_rounded,
+>>>>>>> a4805486dbb60e2962759f30db531613a9992c50
                               size: 14,
                               color: c.text3,
                             ),

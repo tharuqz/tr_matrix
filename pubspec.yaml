@@ -35,7 +35,11 @@ dependencies:
   youtube_player_iframe: ^5.2.0
   media_kit: ^1.1.11
   media_kit_video: ^1.2.5
+<<<<<<< HEAD
   media_kit_libs_windows_video: ^1.0.7
+=======
+  media_kit_libs_video: ^1.0.7
+>>>>>>> a4805486dbb60e2962759f30db531613a9992c50
   youtube_explode_dart: ^2.3.9
   local_auth: ^2.3.0
   window_manager: ^0.4.3
